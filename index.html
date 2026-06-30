@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Angle Protocol</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div id="loading" class="loading-screen is-active" aria-live="polite">
+      <div class="loading-mark" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <p class="loading-kicker">Angle Protocol</p>
+      <h1>Initializing Range</h1>
+      <div class="loading-bar" aria-hidden="true"><span id="loadingFill"></span></div>
+      <p id="loadingText" class="loading-text">Loading assets 0%</p>
+    </div>
+
+    <main id="client" class="client-shell" aria-label="Angle Protocol game client">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <span>Angle</span>
+            <strong>Protocol</strong>
+          </div>
+        </div>
+        <nav class="nav-tabs" aria-label="Primary">
+          <button class="nav-tab is-active" type="button" data-screen="home">Home</button>
+          <button class="nav-tab" type="button" data-screen="play">Play</button>
+          <button class="nav-tab" type="button" data-screen="squad">Squad</button>
+          <button class="nav-tab" type="button" data-screen="loadout">Loadout</button>
+          <button class="nav-tab" type="button" data-screen="contracts">Contracts</button>
+          <button class="nav-tab" type="button" data-screen="profile">Profile</button>
+          <button class="nav-tab" type="button" data-screen="skins">Collection</button>
+          <button class="nav-tab" type="button" data-screen="settings">Settings</button>
+        </nav>
+        <div class="topbar-actions">
+          <button class="topbar-play" type="button" data-action="quick-play">Play</button>
+          <div class="account-chip">
+            <span id="profileInitial">A</span>
+            <div>
+              <strong id="profileName">Aegis</strong>
+              <small id="profileRank">Ironline I</small>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="client-page is-active" data-page="home" aria-label="Home">
+        <div class="home-grid">
+          <section class="hero-panel">
+            <div class="hero-copy">
+              <p class="eyebrow">Season Directive</p>
+              <h1>Angle Protocol</h1>
+              <p id="briefingMotto">Hold the angle. Break the round.</p>
+              <div class="brief-strip" aria-label="Current setup">
+                <span id="briefCallsign">Aegis online</span>
+                <span id="briefAgent">Agent: Aegis</span>
+                <span id="briefMap">Map: Foundry</span>
+                <span id="briefTone">Tone: Neon noir</span>
+              </div>
+              <div class="hero-actions">
+                <button class="primary-action play-now-action" type="button" data-action="quick-play">Play</button>
+                <button class="ghost-action" type="button" data-goto="play">Choose Mode</button>
+                <button class="ghost-action" type="button" data-goto="squad">Customize</button>
+              </div>
+            </div>
+            <div class="hero-visual" aria-hidden="true">
+              <div class="map-slab">
+                <span class="map-wall map-wall-a"></span>
+                <span class="map-wall map-wall-b"></span>
+                <span class="map-wall map-wall-c"></span>
+                <span class="map-wall map-wall-d"></span>
+                <span class="route route-blue"></span>
+                <span class="route route-red"></span>
+                <span class="site-dot site-a"></span>
+                <span class="site-dot site-b"></span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="ops-panel">
+            <div>
+              <p class="eyebrow">Live Board</p>
+              <h2>Queue Readiness</h2>
+            </div>
+            <div class="readiness-list">
+              <span><strong>Mode</strong><em id="homeMode">Split-screen Duel</em></span>
+              <span><strong>Primary</strong><em id="homePrimary">AK-47</em></span>
+              <span><strong>Contract</strong><em id="homeContract">Entry Fundamentals</em></span>
+            </div>
+          </aside>
+
+          <section class="news-row" aria-label="Updates">
+            <article class="news-card">
+              <span>Patch Note</span>
+              <strong>Client shell expanded</strong>
+              <p>Pre-match flow now carries identity, queue, squad, loadout, contracts, collection, and settings.</p>
+            </article>
+            <article class="news-card">
+              <span>Featured Drill</span>
+              <strong>Two-angle collapse</strong>
+              <p>Bot timing rewards patient clears, short bursts, and fast trade positioning.</p>
+            </article>
+            <article class="news-card">
+              <span>Style Target</span>
+              <strong>Compact, sharp, readable</strong>
+              <p>The client favors fast scanning over a marketing landing page.</p>
+            </article>
+          </section>
+        </div>
+      </section>
+
+      <section class="client-page" data-page="play" aria-label="Play">
+        <div class="play-layout">
+          <aside class="mode-stack">
+            <button class="mode-card is-selected" type="button" data-mode="multiplayer">
+              <span>Local 2v2</span>
+              <strong>Split-screen Duel</strong>
+              <small>Two players, one keyboard, one bot ally each.</small>
+            </button>
+            <button class="mode-card" type="button" data-mode="singleplayer">
+              <span>Solo</span>
+              <strong>Practice Strike</strong>
+              <small>Player 1 plus a bot ally against two bots.</small>
+            </button>
+          </aside>
+          <div class="play-main">
+            <div class="scene-preview">
+              <div class="scene-header">
+                <div>
+                  <p class="eyebrow">Map Vote</p>
+                  <h2 id="selectedMapTitle">Foundry</h2>
+                </div>
+                <span id="selectedMapTempo">Close angles</span>
+              </div>
+              <div class="preview-room" aria-hidden="true">
+                <span class="wall wall-a"></span>
+                <span class="wall wall-b"></span>
+                <span class="wall wall-c"></span>
+                <span class="player-token blue"></span>
+                <span class="player-token red"></span>
+              </div>
+              <div class="map-vote" aria-label="Map options">
+                <button class="map-card is-selected" type="button" data-map="foundry">
+                  <strong>Foundry</strong>
+                  <span>Close angles</span>
+                </button>
+                <button class="map-card" type="button" data-map="relay">
+                  <strong>Relay</strong>
+                  <span>Mid pressure</span>
+                </button>
+                <button class="map-card" type="button" data-map="harbor">
+                  <strong>Harbor</strong>
+                  <span>Long sightlines</span>
+                </button>
+              </div>
+            </div>
+            <div class="queue-panel">
+              <p class="eyebrow">Selected Mode</p>
+              <h2 id="selectedModeTitle">Split-screen Duel</h2>
+              <p id="selectedModeBody">Blue and red squads enter a compact angle map. Win by eliminating the other team before the timer expires.</p>
+              <div class="queue-meta">
+                <span id="roundLengthLabel">2 minute rounds</span>
+                <span>Flash kit</span>
+                <span id="selectedModePlayers">2 local players</span>
+                <span id="selectedModeMap">Foundry</span>
+                <span id="selectedModeAgent">Aegis</span>
+              </div>
+              <button id="startMatch" class="primary-action" type="button">Start Match</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="client-page" data-page="squad" aria-label="Squad">
+        <div class="squad-layout">
+          <section class="identity-lab">
+            <div>
+              <p class="eyebrow">Squad Identity</p>
+              <h2 id="selectedAgentName">Aegis</h2>
+              <p id="selectedAgentBio">A calm controller who turns compact rooms into disciplined crossfires.</p>
+            </div>
+            <label>
+              <span>Callsign</span>
+              <input id="callsignInput" type="text" maxlength="12" value="Aegis" autocomplete="off">
+            </label>
+            <label>
+              <span>Squad Motto</span>
+              <input id="squadMotto" type="text" maxlength="42" value="Hold the angle. Break the round." autocomplete="off">
+            </label>
+            <label>
+              <span>Season Tone</span>
+              <select id="seasonTone">
+                <option value="Neon noir" selected>Neon noir</option>
+                <option value="Industrial dusk">Industrial dusk</option>
+                <option value="Clean esports">Clean esports</option>
+                <option value="Solar punk">Solar punk</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="agent-select" aria-label="Agent selection">
+            <button class="agent-card is-selected" type="button" data-agent="aegis">
+              <span class="agent-portrait portrait-aegis" aria-hidden="true"></span>
+              <em>Controller</em>
+              <strong>Aegis</strong>
+              <small>Locks the cleanest angle and refuses panic.</small>
+            </button>
+            <button class="agent-card" type="button" data-agent="vanta">
+              <span class="agent-portrait portrait-vanta" aria-hidden="true"></span>
+              <em>Duelist</em>
+              <strong>Vanta</strong>
+              <small>Fast entry pressure with tight burst timing.</small>
+            </button>
+            <button class="agent-card" type="button" data-agent="kestrel">
+              <span class="agent-portrait portrait-kestrel" aria-hidden="true"></span>
+              <em>Scout</em>
+              <strong>Kestrel</strong>
+              <small>Reads rotations and punishes late peeks.</small>
+            </button>
+            <button class="agent-card" type="button" data-agent="morrow">
+              <span class="agent-portrait portrait-morrow" aria-hidden="true"></span>
+              <em>Anchor</em>
+              <strong>Morrow</strong>
+              <small>Trades damage for stable retake timing.</small>
+            </button>
+          </section>
+        </div>
+      </section>
+
+      <section class="client-page" data-page="loadout" aria-label="Loadout">
+        <div class="loadout-grid">
+          <section class="loadout-focus">
+            <p class="eyebrow">Arsenal</p>
+            <h2 id="selectedPrimaryName">AK-47</h2>
+            <p id="selectedPrimaryBody">Reliable mid-range control with enough damage to reward head-level placement.</p>
+            <div class="weapon-display" aria-hidden="true">
+              <span class="ak-stock"></span>
+              <span class="ak-receiver"></span>
+              <span class="ak-barrel"></span>
+              <span class="ak-handguard"></span>
+              <span class="ak-mag"></span>
+              <span class="ak-grip"></span>
+            </div>
+            <div class="queue-meta">
+              <span id="loadoutSkinLabel">Sidearm: Snow Tiger</span>
+              <span>Utility: Flash + Lethal</span>
+              <span>Sprint jump enabled</span>
+            </div>
+          </section>
+          <section class="weapon-grid" aria-label="Primary weapons">
+            <button class="weapon-card is-selected" type="button" data-weapon="rifle">
+              <strong>AK-47</strong>
+              <span>Balanced control</span>
+              <meter value="72" max="100"></meter>
+            </button>
+            <button class="weapon-card" type="button" data-weapon="pistol">
+              <strong>Pistol Start</strong>
+              <span>Fast reset drill</span>
+              <meter value="48" max="100"></meter>
+            </button>
+            <button class="weapon-card" type="button" data-weapon="guardian">
+              <strong>Marksman</strong>
+              <span>Tap discipline</span>
+              <meter value="86" max="100"></meter>
+            </button>
+          </section>
+        </div>
+      </section>
+
+      <section class="client-page" data-page="contracts" aria-label="Contracts">
+        <div class="contracts-layout">
+          <section class="contract-track">
+            <div>
+              <p class="eyebrow">Active Contract</p>
+              <h2 id="activeContractTitle">Entry Fundamentals</h2>
+              <p id="activeContractBody">Win rounds by surviving the first contact and trading for your bot teammate.</p>
+            </div>
+            <div class="tier-ladder" aria-label="Contract progress">
+              <span class="is-filled"></span>
+              <span class="is-filled"></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </section>
+          <section class="contract-list" aria-label="Contract options">
+            <button class="contract-card is-selected" type="button" data-contract="entry">
+              <span>01</span>
+              <strong>Entry Fundamentals</strong>
+              <em>First contact survival</em>
+            </button>
+            <button class="contract-card" type="button" data-contract="anchor">
+              <span>02</span>
+              <strong>Anchor Work</strong>
+              <em>Hold, delay, retake</em>
+            </button>
+            <button class="contract-card" type="button" data-contract="utility">
+              <span>03</span>
+              <strong>Utility Timing</strong>
+              <em>Flash before contact</em>
+            </button>
+          </section>
+        </div>
+      </section>
+
+      <section class="client-page" data-page="profile" aria-label="Profile">
+        <div class="profile-grid">
+          <div class="identity-panel">
+            <div class="profile-avatar" aria-hidden="true">A</div>
+            <p class="eyebrow">Field Profile</p>
+            <h2 id="profileTitle">Aegis</h2>
+            <p id="profileBio">Precision controller focused on tight angles, fast reload discipline, and clean flash entries.</p>
+          </div>
+          <div class="stats-grid">
+            <div><span>Rank</span><strong>Ironline I</strong></div>
+            <div><span>Rounds</span><strong id="statRounds">0</strong></div>
+            <div><span>Wins</span><strong id="statWins">0</strong></div>
+            <div><span>Damage</span><strong id="statDamage">0</strong></div>
+          </div>
+          <div class="history-panel">
+            <h3>Recent Contracts</h3>
+            <ul id="historyList">
+              <li><span>Training range ready</span><strong>New</strong></li>
+              <li><span>Split-screen controls verified</span><strong>Done</strong></li>
+              <li><span>Flash kit unlocked</span><strong>Ready</strong></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="client-page" data-page="skins" aria-label="Skins">
+        <div class="collection-head">
+          <div>
+            <p class="eyebrow">Collection</p>
+            <h2>Sidearm Skins</h2>
+          </div>
+          <span id="equippedSkinLabel">Equipped: Snow Tiger</span>
+        </div>
+        <div id="skinGrid" class="skin-grid"></div>
+      </section>
+
+      <section class="client-page" data-page="settings" aria-label="Settings">
+        <div class="settings-grid">
+          <div class="settings-panel">
+            <h2>Gameplay</h2>
+            <label>
+              <span>Round Length</span>
+              <select id="roundLength">
+                <option value="60000">1:00</option>
+                <option value="90000">1:30</option>
+                <option value="120000" selected>2:00</option>
+                <option value="180000">3:00</option>
+              </select>
+            </label>
+            <label>
+              <span>Bot Difficulty</span>
+              <select id="botDifficulty">
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="sharp">Sharp</option>
+              </select>
+            </label>
+            <label>
+              <span>Visual Quality</span>
+              <select id="visualQuality">
+                <option value="fast">Fast</option>
+                <option value="high" selected>High</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-panel">
+            <h2>Keybinds</h2>
+            <div class="bind-grid">
+              <span>P1 Move</span><strong>W A S D</strong>
+              <span>P1 Shoot</span><strong>Q</strong>
+              <span>P1 Reload</span><strong>E</strong>
+              <span>P1 Sprint</span><strong>Shift</strong>
+              <span>P1 Jump</span><strong>F</strong>
+              <span>P1 Weapons</span><strong>1 2</strong>
+              <span>P1 Utility</span><strong>3 4</strong>
+              <span>P2 Move</span><strong>P L ; '</strong>
+              <span>P2 Shoot</span><strong>O</strong>
+              <span>P2 Reload</span><strong>[</strong>
+              <span>P2 Sprint</span><strong>?</strong>
+              <span>P2 Jump</span><strong>.</strong>
+              <span>P2 Weapons</span><strong>8 9</strong>
+              <span>P2 Utility</span><strong>0 -</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section id="matchOverlay" class="match-overlay" aria-label="Match controls">
+      <button id="exitMatch" class="exit-button" type="button">Exit</button>
+    </section>
+
+    <canvas id="game" tabindex="0" aria-label="Angle Protocol split-screen tactical shooter"></canvas>
+    <script src="game.js" defer></script>
+  </body>
+</html>
