@@ -1,2 +1,4 @@
 .playwright-cli/
-.claude/
+.claude/*
+!.claude/commands/
+!.claude/commands/**

@@ -60,7 +60,7 @@
               <div class="brief-strip" aria-label="Current setup">
                 <span id="briefCallsign">Aegis online</span>
                 <span id="briefAgent">Agent: Aegis</span>
-                <span id="briefMap">Map: Foundry</span>
+                <span id="briefMap">Map: Warehouse</span>
                 <span id="briefTone">Tone: Neon noir</span>
               </div>
               <div class="hero-actions">
@@ -89,7 +89,7 @@
               <h2>Queue Readiness</h2>
             </div>
             <div class="readiness-list">
-              <span><strong>Mode</strong><em id="homeMode">Split-screen Duel</em></span>
+              <span><strong>Mode</strong><em id="homeMode">Practice Strike</em></span>
               <span><strong>Primary</strong><em id="homePrimary">AK-47</em></span>
               <span><strong>Contract</strong><em id="homeContract">Entry Fundamentals</em></span>
             </div>
@@ -118,12 +118,12 @@
       <section class="client-page" data-page="play" aria-label="Play">
         <div class="play-layout">
           <aside class="mode-stack">
-            <button class="mode-card is-selected" type="button" data-mode="multiplayer">
+            <button class="mode-card" type="button" data-mode="multiplayer">
               <span>Local 2v2</span>
               <strong>Split-screen Duel</strong>
               <small>Two players, one keyboard, one bot ally each.</small>
             </button>
-            <button class="mode-card" type="button" data-mode="singleplayer">
+            <button class="mode-card is-selected" type="button" data-mode="singleplayer">
               <span>Solo</span>
               <strong>Practice Strike</strong>
               <small>Player 1 plus a bot ally against two bots.</small>
@@ -134,9 +134,9 @@
               <div class="scene-header">
                 <div>
                   <p class="eyebrow">Map Vote</p>
-                  <h2 id="selectedMapTitle">Foundry</h2>
+                  <h2 id="selectedMapTitle">Warehouse</h2>
                 </div>
-                <span id="selectedMapTempo">Close angles</span>
+                <span id="selectedMapTempo">Long mid control</span>
               </div>
               <div class="preview-room" aria-hidden="true">
                 <span class="wall wall-a"></span>
@@ -147,8 +147,8 @@
               </div>
               <div class="map-vote" aria-label="Map options">
                 <button class="map-card is-selected" type="button" data-map="foundry">
-                  <strong>Foundry</strong>
-                  <span>Close angles</span>
+                  <strong>Warehouse</strong>
+                  <span>Long mid control</span>
                 </button>
                 <button class="map-card" type="button" data-map="relay">
                   <strong>Relay</strong>
@@ -162,13 +162,13 @@
             </div>
             <div class="queue-panel">
               <p class="eyebrow">Selected Mode</p>
-              <h2 id="selectedModeTitle">Split-screen Duel</h2>
-              <p id="selectedModeBody">Blue and red squads enter a compact angle map. Win by eliminating the other team before the timer expires.</p>
+              <h2 id="selectedModeTitle">Practice Strike</h2>
+              <p id="selectedModeBody">Player 1 leads blue with one bot teammate against two red defenders.</p>
               <div class="queue-meta">
                 <span id="roundLengthLabel">2 minute rounds</span>
                 <span>Flash kit</span>
-                <span id="selectedModePlayers">2 local players</span>
-                <span id="selectedModeMap">Foundry</span>
+                <span id="selectedModePlayers">1 local player</span>
+                <span id="selectedModeMap">Warehouse</span>
                 <span id="selectedModeAgent">Aegis</span>
               </div>
               <button id="startMatch" class="primary-action" type="button">Start Match</button>
@@ -378,7 +378,8 @@
             <h2>Keybinds</h2>
             <div class="bind-grid">
               <span>P1 Move</span><strong>W A S D</strong>
-              <span>P1 Shoot</span><strong>Q</strong>
+              <span>P1 Aim</span><strong>Mouse</strong>
+              <span>P1 Shoot</span><strong>Click / Q</strong>
               <span>P1 Reload</span><strong>E</strong>
               <span>P1 Sprint</span><strong>Shift</strong>
               <span>P1 Jump</span><strong>F</strong>
@@ -402,6 +403,6 @@
     </section>
 
     <canvas id="game" tabindex="0" aria-label="Angle Protocol split-screen tactical shooter"></canvas>
-    <script src="game.js" defer></script>
+    <script src="game.js?v=20260701-warehouse-yard-v7" defer></script>
   </body>
 </html>

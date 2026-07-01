@@ -50,9 +50,14 @@ const TEAM_BLUE = "blue";
 const TEAM_RED = "red";
 const ROUND_PAUSE_MS = 3600;
 const FOV = Math.PI * 0.4;
-const MAX_VIEW_DIST = 15.5;
+const MAX_VIEW_DIST = 18.5;
 const WALL_STEP = 0.025;
 const PLAYER_RADIUS = 0.18;
+const ENTITY_VIEW_DIST = 17.5;
+const ENTITY_FOV_LIMIT = FOV * 0.72;
+const ENTITY_VISIBILITY_SAMPLE_RADIUS = PLAYER_RADIUS;
+const ENTITY_CORNER_OCCLUSION_MARGIN = 0.42;
+const BOT_SIGHT_RANGE = 10.5;
 const STAMINA_MAX = 100;
 const STAMINA_DRAIN = 34;
 const STAMINA_REGEN = 24;
@@ -89,19 +94,25 @@ const WEAPONS = {
 };
 
 const RAW_MAP = [
-  "##################",
-  "#.....#..........#",
-  "#.....#..##..#...#",
-  "#.............#..#",
-  "###..###..###....#",
-  "#....#....#......#",
-  "#...........##...#",
-  "#..##..##........#",
-  "#......#....#....#",
-  "#..#.......###..##",
-  "#..#..##.........#",
-  "#.....#..........#",
-  "##################",
+  "###############################",
+  "#.............................#",
+  "#........#...........#..#..#..#",
+  "#....#...#...#...#............#",
+  "#......#.......#.......#......#",
+  "#.......#.............#.......#",
+  "#...###.###.........###.###...#",
+  "#...###.#.#.........###.###...#",
+  "#...###.#.#.........###.###...#",
+  "#.............................#",
+  "#...###.###.........#.#.###...#",
+  "#...###.###.........#.#.###...#",
+  "#...###.###.........###.###...#",
+  "#.......#.............#.......#",
+  "#......#.......#.......#......#",
+  "#............#...#...#...#....#",
+  "#..#..#..#...........#........#",
+  "#.............................#",
+  "###############################",
 ];
 
 const CONTROLS = {
@@ -110,6 +121,9 @@ const CONTROLS = {
     back: "s",
     left: "a",
     right: "d",
+    // P1 aims with the mouse (pointer lock); left/right become strafe keys.
+    // P2 stays keyboard-only since split-screen shares one mouse.
+    mouseAim: true,
     shoot: "q",
     reload: "e",
     sprint: ["shift"],
@@ -300,9 +314,9 @@ const AGENTS = [
 const MAPS = [
   {
     id: "foundry",
-    name: "Foundry",
-    tempo: "Close angles",
-    tag: "Foundry",
+    name: "Warehouse",
+    tempo: "Long mid control",
+    tag: "Warehouse",
   },
   {
     id: "relay",
@@ -384,7 +398,7 @@ let lastFrame = performance.now();
 const app = {
   view: "loading",
   page: "home",
-  selectedMode: "multiplayer",
+  selectedMode: "singleplayer",
   selectedMap: "foundry",
   selectedAgent: "aegis",
   selectedPrimary: "rifle",
@@ -405,7 +419,7 @@ const app = {
 };
 
 const game = {
-  mode: "multiplayer",
+  mode: "singleplayer",
   round: 0,
   scores: { [TEAM_BLUE]: 0, [TEAM_RED]: 0 },
   entities: [],
@@ -435,6 +449,44 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
 canvas.addEventListener("click", () => canvas.focus());
+
+const MOUSE_SENSITIVITY = 0.0026;
+const mouse = { dx: 0, down: false };
+
+function pointerLocked() {
+  return document.pointerLockElement === canvas;
+}
+
+function requestPointerAim() {
+  if (pointerLocked() || !canvas.requestPointerLock) return;
+  const result = canvas.requestPointerLock();
+  if (result && typeof result.catch === "function") result.catch(() => {});
+}
+
+canvas.addEventListener("click", () => {
+  if (app.view === "match") requestPointerAim();
+});
+
+window.addEventListener("mousemove", (event) => {
+  if (pointerLocked()) mouse.dx += event.movementX;
+});
+
+canvas.addEventListener("mousedown", (event) => {
+  // On the click that acquires pointer lock, lock isn't held yet at
+  // mousedown time, so that click never fires a shot.
+  if (event.button === 0 && app.view === "match" && pointerLocked()) mouse.down = true;
+});
+
+window.addEventListener("mouseup", (event) => {
+  if (event.button === 0) mouse.down = false;
+});
+
+document.addEventListener("pointerlockchange", () => {
+  if (!pointerLocked()) {
+    mouse.down = false;
+    mouse.dx = 0;
+  }
+});
 
 window.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
@@ -543,6 +595,7 @@ function showClient() {
   game.active = false;
   game.roundEndedAt = 0;
   keys.clear();
+  if (pointerLocked()) document.exitPointerLock();
   setView("client");
   updateStatsUi();
 }
@@ -733,6 +786,8 @@ function startMatch(mode) {
   setView("match");
   startRound();
   canvas.focus();
+  // Called from a click gesture (Play button), so the lock request is allowed.
+  requestPointerAim();
 }
 
 function quickPlay() {
@@ -786,9 +841,11 @@ function raycast(x, y, angle, maxDist = MAX_VIEW_DIST) {
     const rx = x + cos * dist;
     const ry = y + sin * dist;
     if (isWall(rx, ry)) {
+      const cellX = Math.floor(rx);
+      const cellY = Math.floor(ry);
       const fx = Math.abs(rx - Math.floor(rx) - 0.5);
       const fy = Math.abs(ry - Math.floor(ry) - 0.5);
-      return { dist, x: rx, y: ry, side: fx > fy ? 0 : 1, lastOpenX, lastOpenY };
+      return { dist, x: rx, y: ry, cellX, cellY, side: fx > fy ? 0 : 1, lastOpenX, lastOpenY };
     }
     lastOpenX = rx;
     lastOpenY = ry;
@@ -864,38 +921,38 @@ function startRound() {
     controlId: "p1",
     skinId: app.selectedSkin,
     activeWeapon: getPrimaryLoadout().actualWeapon,
-    x: 2.0,
-    y: 2.3,
-    angle: 0.18,
+    x: 2.6,
+    y: 3.6,
+    angle: 0.4,
   });
   const b1 = makeEntity({
     id: "b1",
     name: "B1",
     team: TEAM_BLUE,
     kind: "bot",
-    x: 2.2,
-    y: 3.35,
-    angle: 0.12,
+    x: 6.4,
+    y: 2.6,
+    angle: 0.6,
   });
 
   if (game.mode === "singleplayer") {
     const r1 = makeEntity({
     id: "r1",
-    name: "R1",
-    team: TEAM_RED,
-    kind: "bot",
-      x: 15.2,
-      y: 10.5,
-      angle: Math.PI + 0.2,
+      name: "R1",
+      team: TEAM_RED,
+      kind: "bot",
+      x: 27.4,
+      y: 14.4,
+      angle: Math.PI + 0.4,
     });
     const r2 = makeEntity({
       id: "r2",
       name: "R2",
       team: TEAM_RED,
       kind: "bot",
-      x: 14.5,
-      y: 8.35,
-      angle: Math.PI + 0.1,
+      x: 23.6,
+      y: 15.4,
+      angle: Math.PI + 0.6,
     });
     game.entities = [p1, b1, r1, r2];
     game.humans = [p1];
@@ -909,18 +966,18 @@ function startRound() {
     kind: "human",
     controlId: "p2",
     skinId: "neonriot",
-    x: 15.2,
-    y: 10.5,
-    angle: Math.PI + 0.2,
+    x: 27.4,
+    y: 14.4,
+    angle: Math.PI + 0.4,
   });
   const b2 = makeEntity({
     id: "b2",
     name: "B2",
     team: TEAM_RED,
     kind: "bot",
-    x: 14.5,
-    y: 8.35,
-    angle: Math.PI + 0.1,
+    x: 23.6,
+    y: 15.4,
+    angle: Math.PI + 0.6,
   });
 
   game.entities = [p1, b1, p2, b2];
@@ -1094,7 +1151,8 @@ function updateHuman(entity, dt, now) {
   if (!entity.alive) return;
   const controls = CONTROLS[entity.controlId];
   const flashed = entity.flashedUntil > now;
-  const moving = keys.has(controls.forward) || keys.has(controls.back);
+  const strafing = controls.mouseAim && (keys.has(controls.left) || keys.has(controls.right));
+  const moving = keys.has(controls.forward) || keys.has(controls.back) || strafing;
   const wantsSprint = isBindingDown(controls.sprint) && moving && entity.stamina > 2;
   entity.isSprinting = wantsSprint;
   if (wantsSprint) {
@@ -1115,18 +1173,50 @@ function updateHuman(entity, dt, now) {
   if (entity.jumpBoostUntil > now) moveScale *= JUMP_BOOST_MULTIPLIER;
   const turnScale = flashed ? 0.62 : 1;
 
-  if (keys.has(controls.left)) entity.angle = normalizeAngle(entity.angle - entity.turnSpeed * turnScale * dt);
-  if (keys.has(controls.right)) entity.angle = normalizeAngle(entity.angle + entity.turnSpeed * turnScale * dt);
+  if (controls.mouseAim) {
+    if (mouse.dx !== 0) {
+      entity.angle = normalizeAngle(entity.angle + mouse.dx * MOUSE_SENSITIVITY * turnScale);
+      mouse.dx = 0;
+    }
 
-  let direction = 0;
-  if (keys.has(controls.forward)) direction += 1;
-  if (keys.has(controls.back)) direction -= 1;
-  if (direction !== 0) {
-    const step = entity.speed * moveScale * dt * direction;
-    moveEntity(entity, Math.cos(entity.angle) * step, Math.sin(entity.angle) * step);
+    let mx = 0;
+    let my = 0;
+    if (keys.has(controls.forward)) {
+      mx += Math.cos(entity.angle);
+      my += Math.sin(entity.angle);
+    }
+    if (keys.has(controls.back)) {
+      mx -= Math.cos(entity.angle);
+      my -= Math.sin(entity.angle);
+    }
+    const strafeAngle = entity.angle + Math.PI / 2;
+    if (keys.has(controls.right)) {
+      mx += Math.cos(strafeAngle);
+      my += Math.sin(strafeAngle);
+    }
+    if (keys.has(controls.left)) {
+      mx -= Math.cos(strafeAngle);
+      my -= Math.sin(strafeAngle);
+    }
+    const mag = Math.hypot(mx, my);
+    if (mag > 0) {
+      const step = (entity.speed * moveScale * dt) / mag;
+      moveEntity(entity, mx * step, my * step);
+    }
+  } else {
+    if (keys.has(controls.left)) entity.angle = normalizeAngle(entity.angle - entity.turnSpeed * turnScale * dt);
+    if (keys.has(controls.right)) entity.angle = normalizeAngle(entity.angle + entity.turnSpeed * turnScale * dt);
+
+    let direction = 0;
+    if (keys.has(controls.forward)) direction += 1;
+    if (keys.has(controls.back)) direction -= 1;
+    if (direction !== 0) {
+      const step = entity.speed * moveScale * dt * direction;
+      moveEntity(entity, Math.cos(entity.angle) * step, Math.sin(entity.angle) * step);
+    }
   }
 
-  if (keys.has(controls.shoot)) shoot(entity, now);
+  if (keys.has(controls.shoot) || (controls.mouseAim && mouse.down)) shoot(entity, now);
 }
 
 function tryBotMove(entity, desiredAngle, speed, dt) {
@@ -1178,7 +1268,7 @@ function updateBot(entity, dt, now) {
   }
 
   const desired = angleTo(entity.x, entity.y, target.x, target.y);
-  const seesTarget = targetDist < 8.5 && hasLineOfSight(entity.x, entity.y, target.x, target.y);
+  const seesTarget = targetDist < BOT_SIGHT_RANGE && hasLineOfSight(entity.x, entity.y, target.x, target.y);
 
   if (now > entity.aiNextThink) {
     entity.aiAimError = (Math.random() - 0.5) * tuning.aimError;
@@ -1193,7 +1283,7 @@ function updateBot(entity, dt, now) {
     } else if (targetDist < 2.2) {
       tryBotMove(entity, desired + Math.PI, entity.speed * 0.45, dt);
     }
-    if (diff < 0.11 && targetDist < 8.5) {
+    if (diff < 0.11 && targetDist < BOT_SIGHT_RANGE) {
       shoot(entity, now, entity.aiAimError);
     }
     return;
@@ -1358,6 +1448,90 @@ function shadeColor(color, amount) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+function getWallMaterial(hit) {
+  const row = hit.cellY ?? Math.floor(hit.y);
+  const col = hit.cellX ?? Math.floor(hit.x);
+  const isBoundary =
+    row <= 0 ||
+    col <= 0 ||
+    row >= RAW_MAP.length - 1 ||
+    col >= RAW_MAP[0].length - 1;
+
+  if (isBoundary) {
+    return {
+      kind: "brick",
+      base: [148, 86, 72],
+      dark: "rgba(78, 42, 36, 0.42)",
+      light: "rgba(230, 176, 145, 0.22)",
+    };
+  }
+
+  const containerKey = (Math.floor(col / 4) + Math.floor(row / 3)) % 3;
+  if (containerKey === 0) {
+    return {
+      kind: "container",
+      base: [89, 113, 90],
+      dark: "rgba(25, 42, 33, 0.42)",
+      light: "rgba(178, 197, 161, 0.18)",
+    };
+  }
+  if (containerKey === 1) {
+    return {
+      kind: "container",
+      base: [72, 104, 119],
+      dark: "rgba(22, 36, 46, 0.42)",
+      light: "rgba(173, 200, 209, 0.18)",
+    };
+  }
+  return {
+    kind: "container",
+    base: [142, 112, 76],
+    dark: "rgba(62, 45, 25, 0.42)",
+    light: "rgba(223, 187, 130, 0.2)",
+  };
+}
+
+function drawWallMaterialDetails(material, x, top, colW, wallHeight, corrected, columnIndex) {
+  if (material.kind === "brick") {
+    const mortarAlpha = clamp(0.38 - corrected * 0.022, 0.08, 0.26);
+    ctx.fillStyle = `rgba(52, 30, 27, ${mortarAlpha})`;
+    const course = Math.max(14, Math.min(26, wallHeight * 0.075));
+    for (let y = top + course; y < top + wallHeight; y += course) {
+      ctx.fillRect(x, y, colW + 1.2, 1);
+    }
+    if (columnIndex % 8 === 0) {
+      ctx.fillStyle = material.dark;
+      ctx.fillRect(x, top, 1.2, wallHeight);
+    }
+    if (columnIndex % 17 === 0) {
+      ctx.fillStyle = material.light;
+      ctx.fillRect(x, top + wallHeight * 0.18, colW + 1.2, wallHeight * 0.18);
+    }
+    const windowBand = columnIndex % 64;
+    if (windowBand > 20 && windowBand < 35 && wallHeight > 48) {
+      ctx.fillStyle = `rgba(119, 153, 158, ${clamp(0.26 - corrected * 0.012, 0.08, 0.2)})`;
+      ctx.fillRect(x, top + wallHeight * 0.24, colW + 1.2, wallHeight * 0.16);
+      ctx.fillStyle = `rgba(34, 46, 48, ${clamp(0.34 - corrected * 0.016, 0.08, 0.24)})`;
+      ctx.fillRect(x, top + wallHeight * 0.24, colW + 1.2, 1.5);
+      ctx.fillRect(x, top + wallHeight * 0.4, colW + 1.2, 1.5);
+    }
+    return;
+  }
+
+  const ribAlpha = clamp(0.5 - corrected * 0.032, 0.08, 0.32);
+  if (columnIndex % 3 === 0) {
+    ctx.fillStyle = `rgba(18, 25, 24, ${ribAlpha})`;
+    ctx.fillRect(x, top, 1.5, wallHeight);
+  }
+  if (columnIndex % 9 === 0) {
+    ctx.fillStyle = material.light;
+    ctx.fillRect(x, top + wallHeight * 0.1, colW + 1.2, Math.max(2, wallHeight * 0.018));
+    ctx.fillRect(x, top + wallHeight * 0.86, colW + 1.2, Math.max(2, wallHeight * 0.018));
+  }
+  ctx.fillStyle = material.dark;
+  ctx.fillRect(x, top + wallHeight * 0.76, colW + 1.2, wallHeight * 0.24);
+}
+
 function drawViewport(viewer, viewport, now) {
   ctx.save();
   ctx.beginPath();
@@ -1384,22 +1558,14 @@ function drawViewport(viewer, viewport, now) {
     const x = viewport.x + i * colW;
     const distanceShade = clamp(1.3 - corrected / MAX_VIEW_DIST, 0.46, 1.08);
     const sideShade = hit.side === 0 ? 1 : 0.86;
-    const panel = (Math.floor(hit.x * 3) + Math.floor(hit.y * 3)) % 3;
-    const base = panel === 0 ? [237, 218, 178] : panel === 1 ? [215, 201, 166] : [198, 222, 190];
+    const material = getWallMaterial(hit);
+    const shadeAmount = material.kind === "brick"
+      ? clamp(1.38 - corrected / (MAX_VIEW_DIST * 1.35), 0.64, 1.12) * sideShade
+      : distanceShade * sideShade;
 
-    ctx.fillStyle = shadeColor(base, distanceShade * sideShade);
+    ctx.fillStyle = shadeColor(material.base, shadeAmount);
     ctx.fillRect(x, top, colW + 1.2, wallHeight);
-
-    const edgeAlpha = clamp(0.42 - corrected * 0.034, 0, 0.22);
-    if (edgeAlpha > 0.01 && i % 5 === 0) {
-      ctx.fillStyle = `rgba(238, 214, 151, ${edgeAlpha})`;
-      ctx.fillRect(x, top, 1, wallHeight);
-    }
-
-    if (corrected < 4.5) {
-      ctx.fillStyle = `rgba(104, 132, 117, ${clamp(0.18 - corrected * 0.025, 0, 0.09)})`;
-      ctx.fillRect(x, top + wallHeight * 0.72, colW + 1.2, wallHeight * 0.28);
-    }
+    drawWallMaterialDetails(material, x, top, colW, wallHeight, corrected, i);
   }
 
   drawSprites(viewer, viewport, zBuffer);
@@ -1430,21 +1596,39 @@ function drawViewport(viewer, viewport, now) {
 
 function drawSkyAndFloor(viewer, viewport, horizon, now) {
   const ceiling = ctx.createLinearGradient(0, viewport.y, 0, horizon);
-  ceiling.addColorStop(0, "#78c6ff");
-  ceiling.addColorStop(0.52, "#b8e2ff");
-  ceiling.addColorStop(1, "#ffe4aa");
+  ceiling.addColorStop(0, "#6f818a");
+  ceiling.addColorStop(0.52, "#a9b1b3");
+  ceiling.addColorStop(1, "#d8d1bf");
   ctx.fillStyle = ceiling;
   ctx.fillRect(viewport.x, viewport.y, viewport.w, horizon - viewport.y);
 
-  ctx.fillStyle = "rgba(255, 238, 161, 0.72)";
+  ctx.fillStyle = "rgba(226, 214, 176, 0.28)";
   ctx.beginPath();
   ctx.arc(viewport.x + viewport.w * 0.14, viewport.y + viewport.h * 0.14, clamp(viewport.w * 0.045, 24, 44), 0, Math.PI * 2);
   ctx.fill();
 
+  const facadeH = viewport.h * 0.2;
+  const facadeY = horizon - facadeH;
+  ctx.fillStyle = "rgba(134, 73, 62, 0.9)";
+  ctx.fillRect(viewport.x, facadeY, viewport.w, facadeH);
+  ctx.fillStyle = "rgba(72, 37, 32, 0.32)";
+  for (let y = facadeY + 12; y < horizon; y += 18) {
+    ctx.fillRect(viewport.x, y, viewport.w, 1.5);
+  }
+  const windowW = clamp(viewport.w * 0.05, 32, 54);
+  const gap = clamp(viewport.w * 0.08, 52, 82);
+  for (let x = viewport.x + 24; x < viewport.x + viewport.w; x += gap) {
+    ctx.fillStyle = "rgba(136, 167, 171, 0.58)";
+    ctx.fillRect(x, facadeY + facadeH * 0.24, windowW, facadeH * 0.32);
+    ctx.fillStyle = "rgba(32, 44, 47, 0.5)";
+    ctx.fillRect(x, facadeY + facadeH * 0.24, windowW, 2);
+    ctx.fillRect(x + windowW * 0.48, facadeY + facadeH * 0.24, 2, facadeH * 0.32);
+  }
+
   const floor = ctx.createLinearGradient(0, horizon, 0, viewport.y + viewport.h);
-  floor.addColorStop(0, "#d8c899");
-  floor.addColorStop(0.42, "#bfc889");
-  floor.addColorStop(1, "#719f7b");
+  floor.addColorStop(0, "#b8b5aa");
+  floor.addColorStop(0.45, "#8c8f87");
+  floor.addColorStop(1, "#5a5f5b");
   ctx.fillStyle = floor;
   ctx.fillRect(viewport.x, horizon, viewport.w, viewport.y + viewport.h - horizon);
 
@@ -1454,7 +1638,7 @@ function drawSkyAndFloor(viewer, viewport, horizon, now) {
   for (let y = horizon + 8; y < viewport.y + viewport.h; y += stride) {
     const depth = (y - horizon) / (viewport.h - horizon + viewport.y);
     const lineY = y + depth * depth * 22;
-    ctx.strokeStyle = `rgba(255, 248, 210, ${clamp(0.42 - depth * 0.2, 0.08, 0.34)})`;
+    ctx.strokeStyle = `rgba(52, 55, 53, ${clamp(0.34 - depth * 0.17, 0.06, 0.25)})`;
     ctx.beginPath();
     ctx.moveTo(viewport.x, lineY);
     ctx.lineTo(viewport.x + viewport.w, lineY);
@@ -1464,7 +1648,7 @@ function drawSkyAndFloor(viewer, viewport, horizon, now) {
   const vanishingX = viewport.x + viewport.w * (0.5 - Math.sin(viewer.angle) * 0.12);
   for (let i = -5; i <= 5; i += 1) {
     const startX = viewport.x + viewport.w * (i + 5) / 10;
-    ctx.strokeStyle = "rgba(75, 118, 95, 0.32)";
+    ctx.strokeStyle = "rgba(42, 45, 43, 0.25)";
     ctx.beginPath();
     ctx.moveTo(startX, viewport.y + viewport.h);
     ctx.lineTo(vanishingX, horizon + 4);
@@ -1477,33 +1661,115 @@ function drawSkyAndFloor(viewer, viewport, horizon, now) {
   ctx.fillRect(viewport.x, horizon - 2, viewport.w, 3);
 }
 
+function entityVisibilitySamples(viewer, entity) {
+  const sideAngle = angleTo(viewer.x, viewer.y, entity.x, entity.y) + Math.PI / 2;
+  const sx = Math.cos(sideAngle) * ENTITY_VISIBILITY_SAMPLE_RADIUS;
+  const sy = Math.sin(sideAngle) * ENTITY_VISIBILITY_SAMPLE_RADIUS;
+  return [
+    { id: "center", x: entity.x, y: entity.y },
+    { id: "edgeA", x: entity.x - sx, y: entity.y - sy },
+    { id: "edgeB", x: entity.x + sx, y: entity.y + sy },
+  ];
+}
+
+function getEntityVisibility(viewer, entity) {
+  const samples = entityVisibilitySamples(viewer, entity).map((point) => ({
+    ...point,
+    visible: hasLineOfSight(viewer.x, viewer.y, point.x, point.y),
+    rel: normalizeAngle(angleTo(viewer.x, viewer.y, point.x, point.y) - viewer.angle),
+  }));
+  const visibleSamples = samples.filter((point) => point.visible);
+  return {
+    visible: visibleSamples.length > 0,
+    centerVisible: Boolean(samples.find((point) => point.id === "center")?.visible),
+    visibleSamples,
+  };
+}
+
+function getSpriteVisibilityClip(viewport, zBuffer, left, right, dist) {
+  const columnW = viewport.w / zBuffer.length;
+  const start = clamp(Math.floor((left - viewport.x) / columnW), 0, zBuffer.length - 1);
+  const end = clamp(Math.ceil((right - viewport.x) / columnW), 0, zBuffer.length - 1);
+  let visibleLeft = Infinity;
+  let visibleRight = -Infinity;
+
+  for (let column = start; column <= end; column += 1) {
+    if (dist > zBuffer[column] + ENTITY_CORNER_OCCLUSION_MARGIN) continue;
+    const x = viewport.x + column * columnW;
+    visibleLeft = Math.min(visibleLeft, x);
+    visibleRight = Math.max(visibleRight, x + columnW);
+  }
+
+  if (!Number.isFinite(visibleLeft)) return null;
+
+  const clippedLeft = clamp(visibleLeft, viewport.x, viewport.x + viewport.w);
+  const clippedRight = clamp(visibleRight, viewport.x, viewport.x + viewport.w);
+  const width = clippedRight - clippedLeft;
+  if (width < Math.max(6, (right - left) * 0.08)) return null;
+  return { x: clippedLeft, w: width };
+}
+
+function intersectSpriteClip(a, b) {
+  const left = Math.max(a.x, b.x);
+  const right = Math.min(a.x + a.w, b.x + b.w);
+  if (right <= left) return null;
+  return { x: left, w: right - left };
+}
+
+function getCornerPeekClip(viewport, visibility, bodyW) {
+  if (visibility.centerVisible) return { x: viewport.x, w: viewport.w };
+  const xs = visibility.visibleSamples.map((point) => {
+    const projected = Math.tan(point.rel) / Math.tan(FOV / 2);
+    return viewport.x + viewport.w * (0.5 + projected * 0.5);
+  });
+  if (!xs.length) return null;
+  const pad = Math.max(5, bodyW * 0.22);
+  const left = clamp(Math.min(...xs) - pad, viewport.x, viewport.x + viewport.w);
+  const right = clamp(Math.max(...xs) + pad, viewport.x, viewport.x + viewport.w);
+  if (right <= left) return null;
+  return { x: left, w: right - left };
+}
+
 function drawSprites(viewer, viewport, zBuffer) {
   const visible = game.entities
     .filter((entity) => entity !== viewer && entity.alive)
     .map((entity) => {
       const dist = distance(viewer.x, viewer.y, entity.x, entity.y);
       const rel = normalizeAngle(angleTo(viewer.x, viewer.y, entity.x, entity.y) - viewer.angle);
-      return { entity, dist, rel };
+      const visibility = getEntityVisibility(viewer, entity);
+      return { entity, dist, rel, visibility };
     })
-    .filter((item) => Math.abs(item.rel) < FOV * 0.65 && item.dist < MAX_VIEW_DIST)
-    .filter((item) => hasLineOfSight(viewer.x, viewer.y, item.entity.x, item.entity.y))
+    .filter((item) => Math.abs(item.rel) < ENTITY_FOV_LIMIT && item.dist < ENTITY_VIEW_DIST)
+    .filter((item) => item.visibility.visible)
     .sort((a, b) => b.dist - a.dist);
 
   for (const item of visible) {
     const projected = Math.tan(item.rel) / Math.tan(FOV / 2);
     const sx = viewport.x + viewport.w * (0.5 + projected * 0.5);
-    const column = clamp(Math.floor((sx - viewport.x) / (viewport.w / zBuffer.length)), 0, zBuffer.length - 1);
-    if (item.dist > zBuffer[column] + 0.28) continue;
-
-    const size = clamp(viewport.h / (item.dist * 1.02), 22, viewport.h * 0.78);
+    const depth = Math.max(0.02, item.dist * Math.cos(item.rel));
+    const size = clamp(viewport.h / (depth * 1.02), 22, viewport.h * 0.78);
     const bodyW = size * 0.36;
     const bodyH = size * 0.68;
     const footY = viewport.y + viewport.h * 0.57 + size * 0.5;
     const bodyX = sx - bodyW / 2;
     const bodyY = footY - bodyH;
+    const spriteLeft = bodyX - bodyW * 0.2;
+    const spriteRight = bodyX + bodyW * 1.45;
+    const depthClip = getSpriteVisibilityClip(viewport, zBuffer, spriteLeft, spriteRight, depth);
+    if (!depthClip) continue;
+    const peekClip = getCornerPeekClip(viewport, item.visibility, bodyW);
+    if (!peekClip) continue;
+    const visibilityClip = intersectSpriteClip(depthClip, peekClip);
+    if (!visibilityClip) continue;
+
     const teamColor = item.entity.team === TEAM_BLUE ? "#55c8d4" : "#ee6b61";
     const vestColor = item.entity.team === TEAM_BLUE ? "#2b6570" : "#7e312c";
     const isFriendly = item.entity.team === viewer.team;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(visibilityClip.x, viewport.y, visibilityClip.w, viewport.h);
+    ctx.clip();
 
     ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
     ctx.beginPath();
@@ -1543,6 +1809,8 @@ function drawSprites(viewer, viewport, zBuffer) {
     ctx.textBaseline = "middle";
     ctx.fillStyle = isFriendly ? "#e5d9a9" : "#f1b0a6";
     ctx.fillText(item.entity.name, sx, tagY);
+
+    ctx.restore();
   }
 }
 
@@ -1551,14 +1819,15 @@ function projectWorldPoint(viewer, viewport, zBuffer, x, y, height = 0.36) {
   if (dist < 0.08 || dist > MAX_VIEW_DIST) return null;
   const rel = normalizeAngle(angleTo(viewer.x, viewer.y, x, y) - viewer.angle);
   if (Math.abs(rel) > FOV * 0.7) return null;
+  const depth = Math.max(0.02, dist * Math.cos(rel));
   const projected = Math.tan(rel) / Math.tan(FOV / 2);
   const sx = viewport.x + viewport.w * (0.5 + projected * 0.5);
   const column = clamp(Math.floor((sx - viewport.x) / (viewport.w / zBuffer.length)), 0, zBuffer.length - 1);
-  if (dist > zBuffer[column] + 0.35) return null;
+  if (depth > zBuffer[column] + 0.35) return null;
   const horizon = viewport.y + viewport.h * 0.48;
-  const size = viewport.h / (dist * 1.05);
+  const size = viewport.h / (depth * 1.05);
   const sy = horizon + viewport.h * 0.12 - height * size + viewer.jumpHeight * 20;
-  return { x: sx, y: sy, dist, size };
+  return { x: sx, y: sy, dist, depth, size };
 }
 
 function drawWorldEffects(viewer, viewport, zBuffer, now) {
@@ -1946,106 +2215,228 @@ function drawSkinPattern(pattern, x0, y0, x1, y1) {
   ctx.restore();
 }
 
+function drawCenteredRifleViewmodel(skin, weapon, now, muzzleFlashUntil) {
+  const metal = ctx.createLinearGradient(-46, -150, 46, 34);
+  metal.addColorStop(0, "#3b4248");
+  metal.addColorStop(0.45, "#15191d");
+  metal.addColorStop(1, "#07090b");
+
+  const wood = ctx.createLinearGradient(-96, -74, 96, 26);
+  wood.addColorStop(0, "#6a2f18");
+  wood.addColorStop(0.46, "#c06028");
+  wood.addColorStop(1, "#5a2815");
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.32)";
+  ctx.beginPath();
+  ctx.ellipse(0, 28, 158, 26, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(198, 150, 108, 0.92)";
+  ctx.beginPath();
+  ctx.ellipse(-82, 12, 42, 20, -0.42, 0, Math.PI * 2);
+  ctx.ellipse(82, 12, 42, 20, 0.42, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = wood;
+  ctx.beginPath();
+  ctx.moveTo(-92, -52);
+  ctx.lineTo(-34, -74);
+  ctx.lineTo(-24, 8);
+  ctx.lineTo(-78, 30);
+  ctx.closePath();
+  ctx.moveTo(92, -52);
+  ctx.lineTo(34, -74);
+  ctx.lineTo(24, 8);
+  ctx.lineTo(78, 30);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255, 214, 151, 0.18)";
+  ctx.lineWidth = 2;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 42, -58);
+    ctx.lineTo(side * 78, -42);
+    ctx.moveTo(side * 36, -30);
+    ctx.lineTo(side * 66, -14);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = metal;
+  ctx.beginPath();
+  ctx.moveTo(-36, 36);
+  ctx.lineTo(-25, -112);
+  ctx.lineTo(-13, -152);
+  ctx.lineTo(13, -152);
+  ctx.lineTo(25, -112);
+  ctx.lineTo(36, 36);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(244, 234, 214, 0.22)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = skin.accent;
+  ctx.globalAlpha = 0.84;
+  ctx.fillRect(-22, -74, 44, 8);
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = "#090b0d";
+  roundRect(-14, -198, 28, 102, 5);
+  ctx.fill();
+  ctx.fillStyle = "#252b30";
+  roundRect(-7, -202, 14, 118, 5);
+  ctx.fill();
+  ctx.fillStyle = "#050607";
+  roundRect(-21, -207, 42, 16, 5);
+  ctx.fill();
+
+  ctx.strokeStyle = "#0a0c0e";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(-33, -122);
+  ctx.lineTo(-12, -140);
+  ctx.moveTo(33, -122);
+  ctx.lineTo(12, -140);
+  ctx.stroke();
+
+  ctx.fillStyle = "#161a1e";
+  ctx.beginPath();
+  ctx.moveTo(-28, 18);
+  ctx.lineTo(28, 18);
+  ctx.lineTo(18, 118);
+  ctx.lineTo(-18, 118);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255, 244, 220, 0.72)";
+  ctx.font = "800 12px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(weapon.short, 0, -44);
+
+  if (muzzleFlashUntil > now) {
+    ctx.save();
+    ctx.shadowColor = skin.glow;
+    ctx.shadowBlur = 34;
+    ctx.fillStyle = skin.glow;
+    ctx.beginPath();
+    ctx.arc(0, -214, 27, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff7da";
+    ctx.beginPath();
+    ctx.moveTo(0, -252);
+    ctx.lineTo(16, -218);
+    ctx.lineTo(46, -214);
+    ctx.lineTo(16, -204);
+    ctx.lineTo(0, -170);
+    ctx.lineTo(-16, -204);
+    ctx.lineTo(-46, -214);
+    ctx.lineTo(-16, -218);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawCenteredPistolViewmodel(skin, weapon, now, muzzleFlashUntil) {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  ctx.beginPath();
+  ctx.ellipse(0, 50, 96, 20, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const bodyGradient = ctx.createLinearGradient(-34, -138, 34, 32);
+  bodyGradient.addColorStop(0, shadeCss(skin.main, 1.18));
+  bodyGradient.addColorStop(0.48, skin.main);
+  bodyGradient.addColorStop(1, shadeCss(skin.main, 0.55));
+
+  ctx.fillStyle = bodyGradient;
+  ctx.beginPath();
+  ctx.moveTo(-30, 28);
+  ctx.lineTo(-22, -88);
+  ctx.lineTo(-12, -136);
+  ctx.lineTo(12, -136);
+  ctx.lineTo(22, -88);
+  ctx.lineTo(30, 28);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.save();
+  ctx.clip();
+  drawSkinPattern(skin.pattern, -30, -136, 30, 30);
+  ctx.restore();
+
+  ctx.fillStyle = skin.grip;
+  ctx.beginPath();
+  ctx.moveTo(-24, 16);
+  ctx.lineTo(24, 16);
+  ctx.lineTo(34, 96);
+  ctx.lineTo(-34, 96);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#0b0d0f";
+  roundRect(-11, -166, 22, 64, 4);
+  ctx.fill();
+  ctx.fillStyle = skin.accent;
+  ctx.globalAlpha = 0.82;
+  ctx.fillRect(-18, -58, 36, 7);
+  ctx.globalAlpha = 1;
+
+  ctx.strokeStyle = "rgba(255, 244, 220, 0.38)";
+  ctx.lineWidth = 2;
+  roundRect(-22, -96, 44, 16, 4);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255, 244, 220, 0.72)";
+  ctx.font = "800 12px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(weapon.short, 0, -26);
+
+  if (muzzleFlashUntil > now) {
+    ctx.save();
+    ctx.shadowColor = skin.glow;
+    ctx.shadowBlur = 26;
+    ctx.fillStyle = skin.glow;
+    ctx.beginPath();
+    ctx.arc(0, -174, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff7da";
+    ctx.beginPath();
+    ctx.moveTo(0, -208);
+    ctx.lineTo(18, -176);
+    ctx.lineTo(0, -150);
+    ctx.lineTo(-18, -176);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawWeapon(viewer, viewport, now) {
   if (!viewer.alive) return;
   const skin = getSkin(viewer.skinId);
   const weapon = getWeapon(viewer);
   const isPistol = viewer.activeWeapon === "pistol";
   const kick = viewer.weaponKickUntil > now ? 1 : 0;
-  const baseX = viewport.x + viewport.w * (isPistol ? 0.67 : 0.58);
-  const baseY = viewport.y + viewport.h * (0.83 + kick * 0.018 + viewer.jumpHeight * 0.012);
-  const scale = clamp(viewport.w / 720, 0.7, 1.25) * (isPistol ? 0.78 : 0.92);
+  const scale = clamp(viewport.w / 720, 0.7, 1.18) * (isPistol ? 0.72 : 0.78);
+  const baseX = viewport.x + viewport.w * 0.5;
+  const baseY = viewport.y + viewport.h * (isPistol ? 0.84 : 0.86) + viewport.h * kick * 0.018 + viewer.jumpHeight * 8;
 
   ctx.save();
   ctx.translate(baseX, baseY);
   ctx.scale(scale, scale);
 
   if (!isPistol) {
-    drawAk47Viewmodel(skin, weapon, now, viewer.muzzleFlashUntil);
+    drawCenteredRifleViewmodel(skin, weapon, now, viewer.muzzleFlashUntil);
     ctx.restore();
     return;
   }
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.32)";
-  ctx.beginPath();
-  ctx.ellipse(74, 78, isPistol ? 74 : 108, 20, -0.1, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = skin.grip;
-  ctx.beginPath();
-  ctx.moveTo(38, 30);
-  ctx.lineTo(isPistol ? 66 : 80, 38);
-  ctx.lineTo(isPistol ? 58 : 68, 104);
-  ctx.lineTo(25, 94);
-  ctx.closePath();
-  ctx.fill();
-
-  const bodyGradient = ctx.createLinearGradient(0, 0, 178, 0);
-  bodyGradient.addColorStop(0, shadeCss(skin.main, 0.6));
-  bodyGradient.addColorStop(0.5, skin.main);
-  bodyGradient.addColorStop(1, shadeCss(skin.main, 1.25));
-  ctx.fillStyle = bodyGradient;
-  const muzzleX = isPistol ? 144 : 188;
-  ctx.beginPath();
-  ctx.moveTo(8, 8);
-  ctx.lineTo(isPistol ? 116 : 150, isPistol ? -7 : -12);
-  ctx.lineTo(muzzleX, 10);
-  ctx.lineTo(isPistol ? 138 : 176, isPistol ? 34 : 40);
-  ctx.lineTo(28, 58);
-  ctx.closePath();
-  ctx.fill();
-
-  // Coat the body in the skin's motif, clipped to the frame.
-  ctx.save();
-  ctx.clip();
-  drawSkinPattern(skin.pattern, 8, isPistol ? -7 : -12, muzzleX, 58);
-  ctx.restore();
-
-  ctx.fillStyle = skin.accent;
-  ctx.beginPath();
-  ctx.moveTo(58, 8);
-  ctx.lineTo(isPistol ? 102 : 135, isPistol ? 2 : -2);
-  ctx.lineTo(isPistol ? 116 : 148, 9);
-  ctx.lineTo(64, 22);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(255, 244, 220, 0.35)";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(30, 12, 62, 14);
-
-  ctx.fillStyle = "#0c0d0e";
-  ctx.fillRect(isPistol ? 132 : 174, 12, isPistol ? 32 : 42, 12);
-
-  if (viewer.muzzleFlashUntil > now) {
-    ctx.save();
-    ctx.shadowColor = skin.glow;
-    ctx.shadowBlur = 24;
-    ctx.fillStyle = skin.glow;
-    ctx.beginPath();
-    ctx.arc(muzzleX + 30, 18, 18, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#fff7da";
-    ctx.beginPath();
-    ctx.moveTo(muzzleX + 22, 18);
-    ctx.lineTo(muzzleX + 104, -14);
-    ctx.lineTo(muzzleX + 60, 20);
-    ctx.lineTo(muzzleX + 104, 50);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(muzzleX + 30, 18, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  ctx.font = "800 12px Inter, system-ui, sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "rgba(255, 244, 220, 0.72)";
-  ctx.fillText(weapon.short, 38, 5);
-
+  drawCenteredPistolViewmodel(skin, weapon, now, viewer.muzzleFlashUntil);
   ctx.restore();
 }
 
@@ -2359,6 +2750,9 @@ function loop(now) {
   const dt = Math.min(0.033, (now - lastFrame) / 1000);
   lastFrame = now;
   update(now, dt);
+  // Discard any mouse delta updateHuman didn't consume (player dead, round
+  // paused) so the camera doesn't snap when control resumes.
+  mouse.dx = 0;
   draw(now);
   requestAnimationFrame(loop);
 }
