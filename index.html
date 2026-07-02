@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Angle Protocol</title>
+    <link rel="icon" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="12" fill="%23090a0c"/%3E%3Cpath d="M12 32 32 12l20 20-20 20Z" fill="none" stroke="%23f05f51" stroke-width="5"/%3E%3Cpath d="M25 32h14" stroke="%23f1c36e" stroke-width="5" stroke-linecap="round"/%3E%3C/svg%3E'>
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
       { "imports": { "three": "./js/vendor/three.module.js" } }
@@ -32,320 +33,286 @@
           </div>
         </div>
         <nav class="nav-tabs" aria-label="Primary">
-          <button class="nav-tab is-active" type="button" data-screen="home">Home</button>
-          <button class="nav-tab" type="button" data-screen="play">Play</button>
-          <button class="nav-tab" type="button" data-screen="squad">Squad</button>
+          <button class="nav-tab is-active" type="button" data-screen="play">Play</button>
           <button class="nav-tab" type="button" data-screen="loadout">Loadout</button>
-          <button class="nav-tab" type="button" data-screen="contracts">Contracts</button>
           <button class="nav-tab" type="button" data-screen="profile">Profile</button>
-          <button class="nav-tab" type="button" data-screen="skins">Collection</button>
           <button class="nav-tab" type="button" data-screen="settings">Settings</button>
         </nav>
         <div class="topbar-actions">
-          <button class="topbar-play" type="button" data-action="quick-play">Play</button>
-          <div class="account-chip">
-            <span id="profileInitial">A</span>
-            <div>
-              <strong id="profileName">Aegis</strong>
-              <small id="profileRank">Ironline I</small>
-            </div>
-          </div>
+          <button id="quickSettingsToggle" class="icon-button" type="button" aria-expanded="false" aria-controls="quickSettingsPanel" aria-label="Quick settings">⚙</button>
         </div>
       </header>
 
-      <section class="client-page is-active" data-page="home" aria-label="Home">
-        <div class="home-grid">
-          <section class="hero-panel">
-            <div class="hero-copy">
-              <p class="eyebrow">Season Directive</p>
-              <h1>Angle Protocol</h1>
-              <p id="briefingMotto">Hold the angle. Break the round.</p>
-              <div class="brief-strip" aria-label="Current setup">
-                <span id="briefCallsign">Aegis online</span>
-                <span id="briefAgent">Agent: Aegis</span>
-                <span id="briefMap">Map: Foundry</span>
-                <span id="briefTone">Tone: Neon noir</span>
-              </div>
-              <div class="hero-actions">
-                <button class="primary-action play-now-action" type="button" data-action="quick-play">Play</button>
-                <button class="ghost-action" type="button" data-goto="play">Choose Mode</button>
-                <button class="ghost-action" type="button" data-goto="squad">Customize</button>
-              </div>
-            </div>
-            <div class="hero-visual" aria-hidden="true">
-              <div class="map-slab">
-                <span class="map-wall map-wall-a"></span>
-                <span class="map-wall map-wall-b"></span>
-                <span class="map-wall map-wall-c"></span>
-                <span class="map-wall map-wall-d"></span>
-                <span class="route route-blue"></span>
-                <span class="route route-red"></span>
-                <span class="site-dot site-a"></span>
-                <span class="site-dot site-b"></span>
-              </div>
-            </div>
-          </section>
+      <div id="quickSettingsPanel" class="quick-settings-popover" hidden>
+        <label>
+          <span>Volume</span>
+          <input id="quickSettingVolume" type="range" min="0" max="100" step="1">
+        </label>
+        <label>
+          <span>Sensitivity <em id="quickSettingSensLabel">1.00x</em></span>
+          <input id="quickSettingSens" type="range" min="0.2" max="3" step="0.05">
+        </label>
+        <label class="check-row">
+          <input id="quickSettingMute" type="checkbox">
+          <span>Mute</span>
+        </label>
+      </div>
 
-          <aside class="ops-panel">
-            <div>
-              <p class="eyebrow">Live Board</p>
-              <h2>Queue Readiness</h2>
-            </div>
-            <div class="readiness-list">
-              <span><strong>Mode</strong><em id="homeMode">Bot Strike</em></span>
-              <span><strong>Primary</strong><em id="homePrimary">Pike-57</em></span>
-              <span><strong>Contract</strong><em id="homeContract">Entry Fundamentals</em></span>
+      <section class="client-page is-active" data-page="play" aria-label="Play">
+        <div class="lobby-layout">
+          <aside class="lobby-rail">
+            <p class="eyebrow">Loadout Check</p>
+            <h2 id="lobbyWeaponName">Pike-57</h2>
+            <p id="lobbyWeaponBody">Balanced full-auto rifle. Rewards short bursts and head-level discipline.</p>
+            <div id="loadoutStats" class="queue-meta"></div>
+            <div class="queue-meta">
+              <span id="loadoutSkinLabel">Sidearm: Backstop · Snow Tiger</span>
+              <span>Knife ready on 3</span>
+              <span>Utility on 4 / 5</span>
             </div>
           </aside>
 
-          <section class="news-row" aria-label="Updates">
-            <article class="news-card">
-              <span>Patch Note</span>
-              <strong>Foundry goes 3D</strong>
-              <p>The match core is now a full first-person arena: mouse aim, jump-up crates, mid room, utility, and agent abilities.</p>
-            </article>
-            <article class="news-card">
-              <span>Featured Drill</span>
-              <strong>Two-door collapse</strong>
-              <p>Mid room owns the map but has exactly two doors. Dazzler in, trade out, and never re-peek the same angle twice.</p>
-            </article>
-            <article class="news-card">
-              <span>Progression</span>
-              <strong>Contracts pay out</strong>
-              <p>Round wins, damage, and utility hits feed contract tiers. Tiers unlock skins, titles, and crosshair colors.</p>
-            </article>
+          <section class="lobby-core">
+            <div class="lobby-headerline">
+              <span class="eyebrow">Live Queue Build</span>
+              <span id="patchLine" class="patch-line">Patch 1.0: multiplayer rooms, private invites, and knife online are live.</span>
+            </div>
+            <div class="lobby-namebar">
+              <label class="callsign-field">
+                <span class="sr-only">Callsign</span>
+                <input id="callsignInput" type="text" minlength="3" maxlength="16" placeholder="Your callsign" autocomplete="off">
+              </label>
+              <div id="regionSelect" class="region-chips" role="group" aria-label="Region">
+                <button class="chip-button is-selected" type="button" data-region-option="auto">Auto (nearest)</button>
+                <button class="chip-button" type="button" data-region-option="uswest">US West</button>
+                <button class="chip-button" type="button" data-region-option="asia">Asia</button>
+              </div>
+            </div>
+            <button id="startMatch" class="primary-action lobby-play-button" type="button">PLAY</button>
+            <div class="mode-chip-row" role="group" aria-label="Mode">
+              <button class="mode-chip is-selected" type="button" data-mode="random_duel">Random 1v1</button>
+              <button class="mode-chip" type="button" data-mode="random_squad">Random 2v2</button>
+              <button class="mode-chip" type="button" data-mode="bot_squad">2v2 vs Bots</button>
+              <button class="mode-chip" type="button" data-mode="private_room">Private Room</button>
+              <button class="mode-chip" type="button" data-mode="practice">Practice</button>
+            </div>
+            <div id="privateRoomRow" class="private-room-row" hidden>
+              <button id="createPrivateRoom" class="ghost-action" type="button">Create Room</button>
+              <input id="privateRoomCode" type="text" maxlength="6" placeholder="Room code" autocomplete="off" spellcheck="false">
+              <button id="joinPrivateRoom" class="ghost-action" type="button">Join</button>
+              <button id="copyInviteButton" class="ghost-action" type="button" hidden>Copy Invite</button>
+            </div>
+            <p id="lobbyStatus" class="lobby-status">Pick a mode and deploy.</p>
           </section>
-        </div>
-      </section>
 
-      <section class="client-page" data-page="play" aria-label="Play">
-        <div class="play-layout">
-          <aside class="mode-stack">
-            <button class="mode-card is-selected" type="button" data-mode="botstrike">
-              <span>Core</span>
-              <strong>Bot Strike</strong>
-              <small>You and a bot ally versus two hostiles. First to 4 round wins.</small>
-            </button>
-            <button class="mode-card" type="button" data-mode="range">
-              <span>Warm-up</span>
-              <strong>Training Range</strong>
-              <small>Free fire in the Foundry against pop-up target frames.</small>
-            </button>
+          <aside class="lobby-rail lobby-rail-right">
+            <p class="eyebrow">Operator</p>
+            <h2 id="selectedAgentName">Aegis</h2>
+            <p id="selectedAgentBio">A calm controller who turns compact rooms into disciplined crossfires.</p>
+            <p id="selectedAgentAbility" class="ability-line"></p>
+            <div class="queue-meta">
+              <span id="lobbyRankChip">Ironline I</span>
+              <span id="lobbyContractChip">Entry Fundamentals</span>
+              <span id="selectedModeMap">Foundry</span>
+              <span id="selectedModeDifficulty">Bots: Normal</span>
+            </div>
           </aside>
-          <div class="play-main">
-            <div class="scene-preview">
-              <div class="scene-header">
-                <div>
-                  <p class="eyebrow">Arena</p>
-                  <h2>Foundry</h2>
-                </div>
-                <span>Long mid control</span>
-              </div>
-              <div class="preview-room" aria-hidden="true">
-                <span class="wall wall-a"></span>
-                <span class="wall wall-b"></span>
-                <span class="wall wall-c"></span>
-                <span class="player-token blue"></span>
-                <span class="player-token red"></span>
-              </div>
-              <div class="map-vote" aria-label="Map briefing">
-                <div class="map-card is-selected">
-                  <strong>Foundry</strong>
-                  <span>A dusk-lit casting hall: one long mid room with two doors, crate-choked flanks, and jump-up angles.</span>
-                </div>
-              </div>
-            </div>
-            <div class="queue-panel">
-              <p class="eyebrow">Selected Mode</p>
-              <h2 id="selectedModeTitle">Bot Strike</h2>
-              <p id="selectedModeBody">You and a bot ally versus two hostiles. First team to 4 round wins takes the match.</p>
-              <div class="queue-meta">
-                <span id="roundLengthLabel">90s rounds · first to 4</span>
-                <span id="selectedModePlayers">1 player + 3 bots</span>
-                <span id="selectedModeMap">Foundry</span>
-                <span id="selectedModeAgent">Aegis</span>
-                <span id="selectedModeDifficulty">Bots: Normal</span>
-              </div>
-              <button id="startMatch" class="primary-action" type="button">Start Match</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="client-page" data-page="squad" aria-label="Squad">
-        <div class="squad-layout">
-          <section class="identity-lab">
-            <div>
-              <p class="eyebrow">Squad Identity</p>
-              <h2 id="selectedAgentName">Aegis</h2>
-              <p id="selectedAgentBio">A calm controller who turns compact rooms into disciplined crossfires.</p>
-              <p id="selectedAgentAbility" class="ability-line"></p>
-            </div>
-            <label>
-              <span>Callsign</span>
-              <input id="callsignInput" type="text" maxlength="12" value="Aegis" autocomplete="off">
-            </label>
-            <label>
-              <span>Squad Motto</span>
-              <input id="squadMotto" type="text" maxlength="42" value="Hold the angle. Break the round." autocomplete="off">
-            </label>
-            <label>
-              <span>Season Tone</span>
-              <select id="seasonTone">
-                <option value="Neon noir" selected>Neon noir</option>
-                <option value="Industrial dusk">Industrial dusk</option>
-                <option value="Clean esports">Clean esports</option>
-                <option value="Solar punk">Solar punk</option>
-              </select>
-            </label>
-          </section>
-
-          <section class="agent-select" aria-label="Agent selection">
-            <button class="agent-card is-selected" type="button" data-agent="aegis">
-              <span class="agent-portrait portrait-aegis" aria-hidden="true"></span>
-              <em>Controller</em>
-              <strong>Aegis</strong>
-              <small>Bulwark Frame — project a hard-light barrier that blocks shots and bodies.</small>
-            </button>
-            <button class="agent-card" type="button" data-agent="vanta">
-              <span class="agent-portrait portrait-vanta" aria-hidden="true"></span>
-              <em>Duelist</em>
-              <strong>Vanta</strong>
-              <small>Redline Surge — instant reload and a burst of speed to take space.</small>
-            </button>
-            <button class="agent-card" type="button" data-agent="kestrel">
-              <span class="agent-portrait portrait-kestrel" aria-hidden="true"></span>
-              <em>Scout</em>
-              <strong>Kestrel</strong>
-              <small>Harrier Pulse — sonar sweep that paints enemies on your radar.</small>
-            </button>
-            <button class="agent-card" type="button" data-agent="morrow">
-              <span class="agent-portrait portrait-morrow" aria-hidden="true"></span>
-              <em>Anchor</em>
-              <strong>Morrow</strong>
-              <small>Gravemark Ward — a 50-point overshield that decays while you hold.</small>
-            </button>
-          </section>
         </div>
       </section>
 
       <section class="client-page" data-page="loadout" aria-label="Loadout">
-        <div class="loadout-grid">
-          <section class="loadout-focus">
-            <p class="eyebrow">Arsenal</p>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Loadout</p>
             <h2 id="selectedPrimaryName">Pike-57</h2>
             <p id="selectedPrimaryBody">Balanced full-auto rifle. Rewards short bursts and head-level discipline.</p>
-            <div class="weapon-display" aria-hidden="true">
-              <span class="ak-stock"></span>
-              <span class="ak-receiver"></span>
-              <span class="ak-barrel"></span>
-              <span class="ak-handguard"></span>
-              <span class="ak-mag"></span>
-              <span class="ak-grip"></span>
-            </div>
-            <div id="loadoutStats" class="queue-meta"></div>
-            <div class="queue-meta">
-              <span id="loadoutSkinLabel">Sidearm: Backstop · Snow Tiger</span>
-              <span>Utility: Dazzler ×2 + Splinter ×1</span>
-              <span>Ability on Q</span>
-            </div>
-          </section>
-          <section class="weapon-grid" aria-label="Primary weapons">
-            <button class="weapon-card is-selected" type="button" data-weapon="pike">
-              <strong>Pike-57</strong>
-              <span>Balanced control · full auto</span>
-              <meter value="74" max="100"></meter>
-            </button>
-            <button class="weapon-card" type="button" data-weapon="wasp">
-              <strong>Wasp K9</strong>
-              <span>Mobile pressure · fast SMG</span>
-              <meter value="62" max="100"></meter>
-            </button>
-            <button class="weapon-card" type="button" data-weapon="longshot">
-              <strong>Longshot DX</strong>
-              <span>Tap discipline · one-tap heads</span>
-              <meter value="88" max="100"></meter>
-            </button>
-          </section>
+          </div>
+          <div class="section-tabs" role="tablist" aria-label="Loadout tabs">
+            <button class="section-tab is-active" type="button" data-subtab-group="loadout" data-subtab="overview">Overview</button>
+            <button class="section-tab" type="button" data-subtab-group="loadout" data-subtab="collection">Collection</button>
+          </div>
         </div>
-      </section>
 
-      <section class="client-page" data-page="contracts" aria-label="Contracts">
-        <div class="contracts-layout">
-          <section class="contract-track">
+        <div class="subtab-panel is-active" data-subtab-panel="loadout:overview">
+          <div class="loadout-grid">
+            <section class="loadout-focus">
+              <div class="weapon-display" aria-hidden="true">
+                <span class="ak-stock"></span>
+                <span class="ak-receiver"></span>
+                <span class="ak-barrel"></span>
+                <span class="ak-handguard"></span>
+                <span class="ak-mag"></span>
+                <span class="ak-grip"></span>
+              </div>
+              <div class="queue-meta">
+                <span>Knife on 3</span>
+                <span>Splinter on 4</span>
+                <span>Dazzler on 5</span>
+                <span>Ability on Q</span>
+              </div>
+            </section>
+            <section class="weapon-grid" aria-label="Primary weapons">
+              <button class="weapon-card is-selected" type="button" data-weapon="pike">
+                <strong>Pike-57</strong>
+                <span>Balanced control · full auto</span>
+                <meter value="74" max="100"></meter>
+              </button>
+              <button class="weapon-card" type="button" data-weapon="wasp">
+                <strong>Wasp K9</strong>
+                <span>Mobile pressure · fast SMG</span>
+                <meter value="62" max="100"></meter>
+              </button>
+              <button class="weapon-card" type="button" data-weapon="longshot">
+                <strong>Longshot DX</strong>
+                <span>Tap discipline · one-tap heads</span>
+                <meter value="88" max="100"></meter>
+              </button>
+            </section>
+          </div>
+        </div>
+
+        <div class="subtab-panel" data-subtab-panel="loadout:collection">
+          <div class="collection-head">
             <div>
-              <p class="eyebrow">Active Contract</p>
-              <h2 id="activeContractTitle">Entry Fundamentals</h2>
-              <p id="activeContractBody">Win rounds. Survive the first contact, trade for your bot teammate, close it out.</p>
-              <p id="contractProgressLabel" class="contract-progress-label"></p>
+              <p class="eyebrow">Collection</p>
+              <h2>Sidearm Skins</h2>
             </div>
-            <div id="contractLadder" class="tier-ladder" aria-label="Contract progress"></div>
-          </section>
-          <section class="contract-list" aria-label="Contract options">
-            <button class="contract-card is-selected" type="button" data-contract="entry">
-              <span>01</span>
-              <strong>Entry Fundamentals</strong>
-              <em>Win rounds</em>
-            </button>
-            <button class="contract-card" type="button" data-contract="anchor">
-              <span>02</span>
-              <strong>Anchor Work</strong>
-              <em>Deal damage</em>
-            </button>
-            <button class="contract-card" type="button" data-contract="utility">
-              <span>03</span>
-              <strong>Utility Timing</strong>
-              <em>Land utility</em>
-            </button>
-          </section>
+            <span id="equippedSkinLabel">Equipped: Snow Tiger</span>
+          </div>
+          <div id="skinGrid" class="skin-grid"></div>
+          <div class="collection-sub">
+            <div>
+              <h3>Crosshair Colors</h3>
+              <div id="crosshairGrid" class="chip-grid"></div>
+            </div>
+            <div>
+              <h3>Titles</h3>
+              <div id="titleGrid" class="chip-grid"></div>
+            </div>
+          </div>
         </div>
       </section>
 
       <section class="client-page" data-page="profile" aria-label="Profile">
-        <div class="profile-grid">
-          <div class="identity-panel">
-            <div id="profileAvatar" class="profile-avatar" aria-hidden="true">A</div>
-            <p class="eyebrow">Field Profile</p>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Profile</p>
             <h2 id="profileTitle">Aegis</h2>
-            <p id="profileTitleTag" class="profile-title-tag">Recruit</p>
             <p id="profileBio">Precision controller focused on tight angles, fast reload discipline, and clean flash entries.</p>
-            <div class="xp-bar"><span id="profileXpBar"></span></div>
-            <p id="profileXpLabel" class="xp-label">0 / 350 XP to level 2</p>
           </div>
-          <div class="stats-grid">
-            <div><span>Rank</span><strong id="statRank">Ironline I</strong></div>
-            <div><span>Level</span><strong id="statLevel">Lv 1</strong></div>
-            <div><span>Matches</span><strong id="statMatches">0</strong></div>
-            <div><span>Wins</span><strong id="statWinsBig">0</strong></div>
-            <div><span>Kills</span><strong id="statKills">0</strong></div>
-            <div><span>K/D</span><strong id="statKd">0</strong></div>
-            <div><span>Headshots</span><strong id="statHeadshots">0</strong></div>
-            <div><span>Damage</span><strong id="statDamageBig">0</strong></div>
-          </div>
-          <div class="history-panel">
-            <h3>Match History</h3>
-            <ul id="historyList"></ul>
+          <div class="section-tabs" role="tablist" aria-label="Profile tabs">
+            <button class="section-tab is-active" type="button" data-subtab-group="profile" data-subtab="overview">Overview</button>
+            <button class="section-tab" type="button" data-subtab-group="profile" data-subtab="squad">Squad</button>
+            <button class="section-tab" type="button" data-subtab-group="profile" data-subtab="contracts">Contracts</button>
           </div>
         </div>
-      </section>
 
-      <section class="client-page" data-page="skins" aria-label="Collection">
-        <div class="collection-head">
-          <div>
-            <p class="eyebrow">Collection</p>
-            <h2>Sidearm Skins</h2>
+        <div class="subtab-panel is-active" data-subtab-panel="profile:overview">
+          <div class="profile-grid">
+            <div class="identity-panel">
+              <div id="profileAvatar" class="profile-avatar" aria-hidden="true">A</div>
+              <p class="eyebrow">Field Profile</p>
+              <p id="profileTitleTag" class="profile-title-tag">Recruit</p>
+              <div class="xp-bar"><span id="profileXpBar"></span></div>
+              <p id="profileXpLabel" class="xp-label">0 / 350 XP to level 2</p>
+            </div>
+            <div class="stats-grid">
+              <div><span>Rank</span><strong id="statRank">Ironline I</strong></div>
+              <div><span>Level</span><strong id="statLevel">Lv 1</strong></div>
+              <div><span>Matches</span><strong id="statMatches">0</strong></div>
+              <div><span>Wins</span><strong id="statWinsBig">0</strong></div>
+              <div><span>Kills</span><strong id="statKills">0</strong></div>
+              <div><span>K/D</span><strong id="statKd">0</strong></div>
+              <div><span>Headshots</span><strong id="statHeadshots">0</strong></div>
+              <div><span>Damage</span><strong id="statDamageBig">0</strong></div>
+            </div>
+            <div class="history-panel">
+              <h3>Match History</h3>
+              <ul id="historyList"></ul>
+            </div>
           </div>
-          <span id="equippedSkinLabel">Equipped: Snow Tiger</span>
         </div>
-        <div id="skinGrid" class="skin-grid"></div>
-        <div class="collection-sub">
-          <div>
-            <h3>Crosshair Colors</h3>
-            <div id="crosshairGrid" class="chip-grid"></div>
+
+        <div class="subtab-panel" data-subtab-panel="profile:squad">
+          <div class="squad-layout">
+            <section class="identity-lab">
+              <div>
+                <p class="eyebrow">Squad Identity</p>
+                <h2 id="squadCallsignLabel">Aegis</h2>
+                <p id="squadCallsignNote">Callsign is set from the Play lobby and saved on this device.</p>
+              </div>
+              <label>
+                <span>Squad Motto</span>
+                <input id="squadMotto" type="text" maxlength="42" value="Hold the angle. Break the round." autocomplete="off">
+              </label>
+              <label>
+                <span>Season Tone</span>
+                <select id="seasonTone">
+                  <option value="Neon noir" selected>Neon noir</option>
+                  <option value="Industrial dusk">Industrial dusk</option>
+                  <option value="Clean esports">Clean esports</option>
+                  <option value="Solar punk">Solar punk</option>
+                </select>
+              </label>
+            </section>
+
+            <section class="agent-select" aria-label="Agent selection">
+              <button class="agent-card is-selected" type="button" data-agent="aegis">
+                <span class="agent-portrait portrait-aegis" aria-hidden="true"></span>
+                <em>Controller</em>
+                <strong>Aegis</strong>
+                <small>Bulwark Frame — project a hard-light barrier that blocks shots and bodies.</small>
+              </button>
+              <button class="agent-card" type="button" data-agent="vanta">
+                <span class="agent-portrait portrait-vanta" aria-hidden="true"></span>
+                <em>Duelist</em>
+                <strong>Vanta</strong>
+                <small>Redline Surge — instant reload and a burst of speed to take space.</small>
+              </button>
+              <button class="agent-card" type="button" data-agent="kestrel">
+                <span class="agent-portrait portrait-kestrel" aria-hidden="true"></span>
+                <em>Scout</em>
+                <strong>Kestrel</strong>
+                <small>Harrier Pulse — sonar sweep that paints enemies on your radar.</small>
+              </button>
+              <button class="agent-card" type="button" data-agent="morrow">
+                <span class="agent-portrait portrait-morrow" aria-hidden="true"></span>
+                <em>Anchor</em>
+                <strong>Morrow</strong>
+                <small>Gravemark Ward — a 50-point overshield that decays while you hold.</small>
+              </button>
+            </section>
           </div>
-          <div>
-            <h3>Titles</h3>
-            <div id="titleGrid" class="chip-grid"></div>
+        </div>
+
+        <div class="subtab-panel" data-subtab-panel="profile:contracts">
+          <div class="contracts-layout">
+            <section class="contract-track">
+              <div>
+                <p class="eyebrow">Active Contract</p>
+                <h2 id="activeContractTitle">Entry Fundamentals</h2>
+                <p id="activeContractBody">Win rounds. Survive the first contact, trade for your bot teammate, close it out.</p>
+                <p id="contractProgressLabel" class="contract-progress-label"></p>
+              </div>
+              <div id="contractLadder" class="tier-ladder" aria-label="Contract progress"></div>
+            </section>
+            <section class="contract-list" aria-label="Contract options">
+              <button class="contract-card is-selected" type="button" data-contract="entry">
+                <span>01</span>
+                <strong>Entry Fundamentals</strong>
+                <em>Win rounds</em>
+              </button>
+              <button class="contract-card" type="button" data-contract="anchor">
+                <span>02</span>
+                <strong>Anchor Work</strong>
+                <em>Deal damage</em>
+              </button>
+              <button class="contract-card" type="button" data-contract="utility">
+                <span>03</span>
+                <strong>Utility Timing</strong>
+                <em>Land utility</em>
+              </button>
+            </section>
           </div>
         </div>
       </section>
@@ -396,14 +363,13 @@
             <div class="bind-grid">
               <span>Move</span><strong>W A S D</strong>
               <span>Aim</span><strong>Mouse</strong>
-              <span>Shoot</span><strong>Left Click</strong>
+              <span>Shoot / Stab</span><strong>LMB / RMB</strong>
               <span>Sprint</span><strong>Shift</strong>
               <span>Jump</span><strong>Space</strong>
               <span>Reload</span><strong>R</strong>
-              <span>Weapons</span><strong>1 / 2</strong>
-              <span>Splinter</span><strong>3</strong>
-              <span>Dazzler</span><strong>4</strong>
-              <span>Ability</span><strong>Q</strong>
+              <span>Primary / Sidearm / Knife</span><strong>1 / 2 / 3</strong>
+              <span>Splinter / Dazzler</span><strong>4 / 5</strong>
+              <span>Ability / Inspect</span><strong>Q / F</strong>
               <span>Pause</span><strong>Esc</strong>
             </div>
           </div>
@@ -411,7 +377,8 @@
       </section>
     </main>
 
-    <!-- Onboarding brief (first run) -->
+    <div id="lobbyToast" class="lobby-toast" hidden></div>
+
     <div id="onboarding" class="modal-layer" aria-label="Protocol brief">
       <div class="modal-panel onboarding-panel">
         <p class="eyebrow">Protocol Brief</p>
@@ -422,18 +389,75 @@
           <span>Aim / Shoot</span><strong>Mouse / Click</strong>
           <span>Sprint / Jump</span><strong>Shift / Space</strong>
           <span>Reload</span><strong>R</strong>
-          <span>Grenades</span><strong>3 / 4</strong>
+          <span>Knife / Inspect</span><strong>3 / F</strong>
+          <span>Splinter / Dazzler</span><strong>4 / 5</strong>
           <span>Agent Ability</span><strong>Q</strong>
           <span>Pause</span><strong>Esc</strong>
         </div>
         <div class="hero-actions">
           <button id="onboardingStart" class="primary-action" type="button">Run Training Range</button>
-          <button id="onboardingSkip" class="ghost-action" type="button">Straight to Client</button>
+          <button id="onboardingSkip" class="ghost-action" type="button">Straight to Lobby</button>
         </div>
       </div>
     </div>
 
-    <!-- Match results (scoreboard) -->
+    <div id="onlineConsent" class="modal-layer" aria-label="Online consent">
+      <div class="modal-panel consent-panel">
+        <p class="eyebrow">Online Play</p>
+        <h2>Before you go online</h2>
+        <div class="consent-copy">
+          <p>Playing online sends your callsign and live gameplay (position, shots, score) to the match server while you play.</p>
+          <p>No account needed. Your progress and settings stay on this device.</p>
+          <p>Optional sign-in to sync progress may come later.</p>
+        </div>
+        <details class="consent-details">
+          <summary>Details</summary>
+          <p>Online round data is kept transiently so the server can score rounds and finish matches. There is no chat in v1, and your gameplay data is not sold or shared.</p>
+        </details>
+        <div class="hero-actions">
+          <button id="consentAccept" class="primary-action" type="button">Accept &amp; Play</button>
+          <button id="consentDecline" class="ghost-action" type="button">Not Now</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="queueOverlay" class="modal-layer" aria-label="Queue status">
+      <div class="modal-panel queue-overlay-panel">
+        <p class="eyebrow">Matchmaking</p>
+        <h2>Finding opponents…</h2>
+        <p id="queueOverlayStatus">Finding opponents… 1/2 · 0s</p>
+        <div class="hero-actions">
+          <button id="queueCancelButton" class="ghost-action" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="botOfferModal" class="modal-layer" aria-label="Queue fallback">
+      <div class="modal-panel consent-panel">
+        <p class="eyebrow">Queue Fallback</p>
+        <h2>No opponents found yet</h2>
+        <p id="botOfferBody">A bot match starts in 10s. Keep waiting for real players, or jump in against bots now.</p>
+        <div class="hero-actions">
+          <button id="botOfferPlay" class="primary-action" type="button">Play Bots Now</button>
+          <button id="botOfferWait" class="ghost-action" type="button">Keep Waiting</button>
+          <button id="botOfferCancel" class="ghost-action" type="button">Cancel Queue</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="roomLobbyModal" class="modal-layer" aria-label="Private room lobby">
+      <div class="modal-panel room-lobby-panel">
+        <p class="eyebrow">Private Room</p>
+        <h2 id="roomLobbyCode">------</h2>
+        <p id="roomLobbyStatus">Waiting for opponent.</p>
+        <div class="hero-actions room-lobby-actions">
+          <button id="roomLobbyCopy" class="primary-action" type="button">Copy Invite</button>
+          <button id="roomLobbyLeave" class="ghost-action" type="button">Return to Lobby</button>
+        </div>
+        <ul id="roomLobbyPlayers" class="room-player-list"></ul>
+      </div>
+    </div>
+
     <div id="matchResults" class="modal-layer results-layer" aria-label="Match results">
       <div class="modal-panel results-panel">
         <p class="eyebrow">Match Complete</p>
@@ -447,7 +471,6 @@
       </div>
     </div>
 
-    <!-- Rewards / progression -->
     <div id="matchRewards" class="modal-layer results-layer" aria-label="Match rewards">
       <div class="modal-panel results-panel">
         <p class="eyebrow">Debrief</p>
@@ -470,12 +493,11 @@
         <div class="hero-actions">
           <button id="rewardsAgain" class="primary-action" type="button">Play Again</button>
           <button id="rewardsLoadout" class="ghost-action" type="button">Change Loadout</button>
-          <button id="rewardsClose" class="ghost-action" type="button">Return to Client</button>
+          <button id="rewardsClose" class="ghost-action" type="button">Return to Lobby</button>
         </div>
       </div>
     </div>
 
-    <!-- 3D match canvas + HUD -->
     <canvas id="game" tabindex="0" aria-label="Angle Protocol first-person arena"></canvas>
 
     <div id="hud" class="hud-layer" aria-hidden="true">
@@ -530,14 +552,13 @@
           </div>
           <div id="hudWeaponName" class="weapon-name">Pike-57</div>
           <div class="util-line">
-            <span class="util-chip"><i>3</i> Splinter <b id="hudFrag">1</b></span>
-            <span class="util-chip"><i>4</i> Dazzler <b id="hudFlash">2</b></span>
+            <span class="util-chip"><i>4</i> Splinter <b id="hudFrag">1</b></span>
+            <span class="util-chip"><i>5</i> Dazzler <b id="hudFlash">2</b></span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Pause -->
     <div id="pauseOverlay" class="modal-layer pause-layer" aria-label="Pause menu">
       <div class="modal-panel pause-panel">
         <p class="eyebrow">Paused</p>
@@ -545,7 +566,7 @@
         <div class="pause-buttons">
           <button id="pauseResume" class="primary-action" type="button">Resume</button>
           <button id="pauseRestart" class="ghost-action" type="button">Restart Match</button>
-          <button id="pauseExit" class="ghost-action" type="button">Exit to Client</button>
+          <button id="pauseExit" class="ghost-action" type="button">Exit to Lobby</button>
         </div>
         <div class="pause-settings">
           <label>

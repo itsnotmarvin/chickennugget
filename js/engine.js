@@ -10,6 +10,8 @@ import {
 } from "./data.js";
 import { state } from "./state.js";
 import { sfx, startAmbient, stopAmbient, applyVolume } from "./audio.js";
+import { isBackstab, KNIFE_STATS, withinFacingCone } from "../shared/combat.js";
+import { MODE_DEFS } from "../shared/protocol.js";
 
 /* ------------------------------------------------------------------ DOM -- */
 
@@ -664,12 +666,32 @@ function buildViewmodel() {
     g.add(slide, frame, grip, muzzleRing);
     return { group: g, muzzle: new THREE.Vector3(0, 0, -0.22) };
   };
+  const makeKnife = () => {
+    const g = new THREE.Group();
+    const bladeMat = track(new THREE.MeshStandardMaterial({ color: 0xcbd4db, roughness: 0.24, metalness: 0.9 }));
+    const edgeMat = track(new THREE.MeshStandardMaterial({ color: 0xf4ead6, roughness: 0.12, metalness: 0.92 }));
+    const gripMat = track(new THREE.MeshStandardMaterial({ color: 0x121519, roughness: 0.78 }));
+    const blade = new THREE.Mesh(track(new THREE.BoxGeometry(0.018, 0.045, 0.46)), bladeMat);
+    blade.position.set(0, 0.018, -0.2);
+    const edge = new THREE.Mesh(track(new THREE.BoxGeometry(0.008, 0.05, 0.26)), edgeMat);
+    edge.position.set(0, 0.02, -0.32);
+    const guard = new THREE.Mesh(track(new THREE.BoxGeometry(0.055, 0.028, 0.02)), gripMat);
+    guard.position.set(0, -0.02, 0.02);
+    const handle = new THREE.Mesh(track(new THREE.BoxGeometry(0.036, 0.12, 0.12)), gripMat);
+    handle.position.set(0, -0.08, 0.12);
+    handle.rotation.x = 0.16;
+    g.add(blade, edge, guard, handle);
+    g.rotation.set(0.2, 0.6, 0.18);
+    g.position.set(0.04, -0.04, 0.1);
+    return { group: g, muzzle: new THREE.Vector3(0, 0, -0.46) };
+  };
 
   const skin = SKINS.find((s) => s.id === state.skin) || SKINS[0];
   rigs.pike = makeRifle();
   rigs.wasp = makeSmg();
   rigs.longshot = makeDmr();
   rigs.backstop = makePistol(skin);
+  rigs.knife = makeKnife();
 
   for (const key of Object.keys(rigs)) {
     rigs[key].group.visible = false;
@@ -773,6 +795,26 @@ function updateFx(dt) {
 const FREEZE_MS = 3000;
 const ROUND_END_MS = 3000;
 const MATCH_END_MS = 3200;
+const KNIFE_VIEWMODEL = {
+  id: "knife",
+  name: "Knife",
+  short: "KNF",
+  slot: "melee",
+  kind: "melee",
+  auto: false,
+  mag: 0,
+  reserve: 0,
+  damage: KNIFE_STATS.slash.damage,
+  headMult: 1,
+  cooldownMs: KNIFE_STATS.slash.cooldownMs,
+  reloadMs: 0,
+  spread: 0,
+  moveSpread: 0,
+  recoil: 0,
+  kick: 0,
+  range: KNIFE_STATS.slash.range,
+  speedMult: KNIFE_STATS.moveSpeedMult,
+};
 
 let match = null; // active match state
 let player = null;
@@ -791,6 +833,9 @@ export function isMatchActive() {
 }
 
 function weaponState(id) {
+  if (id === "knife") {
+    return { id, def: KNIFE_VIEWMODEL, mag: 0, reserve: 0, lastShot: -9999, reloadingUntil: 0 };
+  }
   const def = WEAPONS[id];
   return { id, def, mag: def.mag, reserve: def.reserve, lastShot: -9999, reloadingUntil: 0 };
 }
@@ -805,7 +850,7 @@ function makePlayer() {
     x: 0, z: 0, y: 0, vy: 0, yaw: 0, pitch: 0,
     hp: 100, shield: 0, shieldDecay: 0,
     alive: true,
-    weapons: { primary: weaponState(state.primary), sidearm: weaponState("backstop") },
+    weapons: { primary: weaponState(state.primary), sidearm: weaponState("backstop"), melee: weaponState("knife") },
     slot: "primary",
     frags: UTILITY.frag.perRound,
     flashes: UTILITY.flash.perRound,
@@ -817,6 +862,13 @@ function makePlayer() {
     stepAcc: 0,
     landedAt: -999,
     lastDamageAt: -999,
+    id: null,
+    online: false,
+    connected: true,
+    meleeUntil: 0,
+    meleeAnimUntil: 0,
+    meleeAnimKind: "slash",
+    inspectUntil: 0,
   };
 }
 
@@ -845,6 +897,51 @@ function makeBot({ team, name, agent, tuning }) {
     lastFiredAt: -9999,
     stepAcc: 0,
   };
+}
+
+function makeRemotePlayer(entry, seat = 0) {
+  const rig = buildCharacterRig(TEAM_COLORS[entry.team] || TEAM_COLORS.red);
+  scene.add(rig.group);
+  rig.group.visible = false;
+  return {
+    id: entry.id,
+    isPlayer: false,
+    isRemote: true,
+    connected: entry.connected ?? true,
+    team: entry.team,
+    name: entry.name,
+    agent: AGENTS[seat % AGENTS.length],
+    rig,
+    x: 0,
+    z: 0,
+    y: 0,
+    yaw: 0,
+    pitch: 0,
+    hp: entry.hp ?? 100,
+    alive: entry.alive ?? true,
+    weaponKind: "rifle",
+    activeWeapon: entry.weapon || "pike",
+    kills: entry.kills ?? 0,
+    deaths: entry.deaths ?? 0,
+    damage: 0,
+    animT: Math.random() * 10,
+    deadFall: 0,
+    moving: false,
+    lastFiredAt: -9999,
+    stepAcc: 0,
+  };
+}
+
+function isOnlineMatch() {
+  return !!match?.online;
+}
+
+function phaseLabel(phase) {
+  if (phase === "freeze") return "freeze";
+  if (phase === "live") return "live";
+  if (phase === "round_end") return "roundEnd";
+  if (phase === "match_end") return "matchEnd";
+  return phase || "lobby";
 }
 
 function spawnCells(ch) {
@@ -912,12 +1009,16 @@ export function startMatch({ modeId, onEnd }) {
     ended: false,
   };
 
-  if (mode.id === "botstrike") {
+  if (mode.id === "botstrike" || mode.id === "duelbot") {
     const allyAgent = AGENTS[(AGENTS.findIndex((a) => a.id === state.agent) + 1) % AGENTS.length];
     const enemyNames = [...BOT_NAMES.enemy].sort(() => Math.random() - 0.5);
-    combatants.push(makeBot({ team: "blue", name: BOT_NAMES.ally[Math.floor(Math.random() * BOT_NAMES.ally.length)], agent: allyAgent, tuning }));
+    if (mode.id === "botstrike") {
+      combatants.push(makeBot({ team: "blue", name: BOT_NAMES.ally[Math.floor(Math.random() * BOT_NAMES.ally.length)], agent: allyAgent, tuning }));
+    }
     combatants.push(makeBot({ team: "red", name: enemyNames[0], agent: AGENTS[1], tuning }));
-    combatants.push(makeBot({ team: "red", name: enemyNames[1], agent: AGENTS[3], tuning }));
+    if (mode.id === "botstrike") {
+      combatants.push(makeBot({ team: "red", name: enemyNames[1], agent: AGENTS[3], tuning }));
+    }
   } else {
     buildRangeTargets();
   }
@@ -931,7 +1032,7 @@ export function startMatch({ modeId, onEnd }) {
   applyCrosshair();
   hud.objective.style.display = mode.id === "range" ? "flex" : "none";
   document.getElementById("hudMatchInfo").style.display = mode.id === "range" ? "none" : "flex";
-  hud.hint.textContent = "WASD move · SHIFT sprint · SPACE jump · 1/2 weapons · Q ability · 3/4 grenades · R reload · ESC pause";
+  hud.hint.textContent = "WASD move · SHIFT sprint · SPACE jump · 1/2/3 weapons · 4/5 utility · Q ability · F inspect · R reload · ESC pause";
   hud.hint.classList.add("is-active");
   setTimeout(() => hud.hint.classList.remove("is-active"), 6500);
 
@@ -939,7 +1040,7 @@ export function startMatch({ modeId, onEnd }) {
   bindMatchInput();
   refreshViewmodel();
 
-  if (mode.id === "botstrike") {
+  if (mode.id === "botstrike" || mode.id === "duelbot") {
     beginRound();
   } else {
     match.phase = "live";
@@ -948,6 +1049,362 @@ export function startMatch({ modeId, onEnd }) {
     showBanner("TRAINING RANGE", "Free fire — pop the gold frames", 2600);
     sfx.roundStart();
   }
+
+  lastFrame = performance.now();
+  cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(frame);
+}
+
+function syncOnlineWeaponSlot(weaponId) {
+  if (weaponId === "backstop") {
+    player.slot = "sidearm";
+    return;
+  }
+  if (weaponId === "knife") {
+    player.slot = "melee";
+    return;
+  }
+  player.slot = "primary";
+}
+
+function resetOnlineRoundState() {
+  grenades.forEach((g) => scene.remove(g.mesh));
+  grenades = [];
+  cellOverrides.clear();
+  barrierMesh.visible = false;
+  hud.spectate.classList.remove("is-active");
+  player.frags = 0;
+  player.flashes = 0;
+  player.shield = 0;
+  player.shieldDecay = 0;
+  player.abilityReadyAt = Infinity;
+  player.meleeUntil = 0;
+  player.meleeAnimUntil = 0;
+  player.inspectUntil = 0;
+}
+
+function ensureOnlineCombatant(summary, seat = 0) {
+  if (summary.id === player.id) return player;
+  let unit = combatants.find((entry) => entry.id === summary.id);
+  if (!unit) {
+    unit = makeRemotePlayer(summary, seat);
+    combatants.push(unit);
+  }
+  unit.name = summary.name;
+  unit.team = summary.team;
+  unit.connected = summary.connected;
+  unit.activeWeapon = summary.weapon || unit.activeWeapon;
+  unit.kills = summary.kills ?? unit.kills;
+  unit.deaths = summary.deaths ?? unit.deaths;
+  if (!summary.alive && unit.alive) {
+    unit.deadFall = Math.max(unit.deadFall, 0.001);
+  }
+  unit.alive = summary.alive;
+  unit.hp = summary.hp;
+  unit.rig.group.visible = summary.connected !== false;
+  return unit;
+}
+
+function syncOnlineRoster(playersSummary) {
+  playersSummary.forEach((summary, index) => {
+    const unit = ensureOnlineCombatant(summary, index);
+    unit.name = summary.name;
+    unit.team = summary.team;
+    unit.connected = summary.connected;
+    unit.alive = summary.alive;
+    unit.hp = summary.hp;
+    unit.kills = summary.kills;
+    unit.deaths = summary.deaths;
+    unit.activeWeapon = summary.weapon || unit.activeWeapon;
+    if (summary.id === player.id) {
+      player.connected = summary.connected;
+      player.team = summary.team;
+      player.alive = summary.alive;
+      player.hp = summary.hp;
+      player.kills = summary.kills;
+      player.deaths = summary.deaths;
+      syncOnlineWeaponSlot(summary.weapon || player.weapons[player.slot].id);
+    }
+  });
+}
+
+function findCombatantById(id) {
+  return combatants.find((unit) => unit.id === id) || null;
+}
+
+function addKillFeedSafe(attackerId, victimId, head) {
+  const attacker = findCombatantById(attackerId);
+  const victim = findCombatantById(victimId);
+  if (!attacker || !victim) return;
+  addKillFeed(attacker, victim, head);
+}
+
+function syncOnlineSnapshot(sample) {
+  if (!sample?.players?.length) return;
+  for (const entry of sample.players) {
+    const unit = findCombatantById(entry.id);
+    if (!unit) continue;
+    if (unit === player) {
+      const error = Math.hypot(player.x - entry.x, player.y - entry.y, player.z - entry.z);
+      if (error > 2) {
+        player.x = entry.x;
+        player.y = entry.y;
+        player.z = entry.z;
+        player.velX = entry.vx;
+        player.velZ = entry.vz;
+      }
+      continue;
+    }
+    unit.x = entry.x;
+    unit.y = entry.y;
+    unit.z = entry.z;
+    unit.yaw = entry.yaw;
+    unit.pitch = entry.pitch;
+    unit.activeWeapon = entry.weapon || unit.activeWeapon;
+    unit.moving = Math.hypot(entry.vx, entry.vz) > 0.25;
+    unit.rig.group.visible = unit.connected !== false;
+  }
+}
+
+function wireOnlineEvents(net) {
+  const unsubs = [];
+  const bind = (type, handler) => {
+    unsubs.push(net.on(type, handler));
+  };
+
+  bind("room_state", (payload) => {
+    if (!match || !match.online) return;
+    match.roomId = payload.roomId;
+    match.roomCode = payload.code;
+    match.roomMode = payload.mode;
+    match.serverPhase = payload.phase;
+    match.phase = phaseLabel(payload.phase);
+    match.round = payload.round;
+    match.scoreBlue = payload.scoreBlue;
+    match.scoreRed = payload.scoreRed;
+    match.phaseUntilServer = payload.phaseEndsAt;
+    match.roundEndsAtServer = payload.roundEndsAt;
+    syncOnlineRoster(payload.players);
+    updateScorePips();
+    if (payload.phase === "lobby") {
+      showBanner("WAITING FOR OPPONENT", payload.code ? `Room ${payload.code}` : "Match setup", 1400);
+    }
+    if (payload.phase === "freeze") {
+      resetOnlineRoundState();
+    }
+  });
+
+  bind("hit", (payload) => {
+    if (!match || !match.online) return;
+    const attacker = findCombatantById(payload.attackerId);
+    const victim = findCombatantById(payload.victimId);
+    if (victim) {
+      victim.hp = payload.hp;
+      if (payload.hp <= 0) victim.alive = false;
+    }
+    if (attacker?.isPlayer) {
+      player.damage += payload.damage;
+      showHitmarker(payload.head, payload.hp <= 0);
+      if (payload.head) sfx.headshot();
+      else sfx.hit();
+    }
+    if (victim?.isPlayer && attacker) {
+      player.lastDamageAt = nowMs();
+      sfx.damaged();
+      showDamageDirection(attacker);
+    }
+  });
+
+  bind("kill", (payload) => {
+    if (!match || !match.online) return;
+    const attacker = findCombatantById(payload.attackerId);
+    const victim = findCombatantById(payload.victimId);
+    if (attacker) attacker.kills += 1;
+    if (victim) {
+      victim.alive = false;
+      victim.hp = 0;
+      victim.deaths += 1;
+      if (victim.isPlayer) {
+        hud.spectate.classList.add("is-active");
+        hud.spectate.textContent = "DOWN";
+      } else {
+        victim.deadFall = Math.max(victim.deadFall, 0.001);
+      }
+    }
+    if (attacker?.isPlayer) {
+      if (payload.head) player.headshots += 1;
+      sfx.kill();
+    }
+    addKillFeedSafe(payload.attackerId, payload.victimId, payload.head);
+  });
+
+  bind("round_start", (payload) => {
+    if (!match || !match.online) return;
+    match.phase = "freeze";
+    match.serverPhase = "freeze";
+    match.round = payload.round;
+    match.scoreBlue = payload.scoreBlue;
+    match.scoreRed = payload.scoreRed;
+    match.phaseUntilServer = payload.freezeEndsAt;
+    resetOnlineRoundState();
+    updateScorePips();
+    showBanner(`ROUND ${payload.round}`, `First to ${match.mode.scoreTarget} — ${payload.scoreBlue} : ${payload.scoreRed}`, FREEZE_MS - 200);
+    sfx.roundStart();
+  });
+
+  bind("round_end", (payload) => {
+    if (!match || !match.online) return;
+    match.phase = "roundEnd";
+    match.serverPhase = "round_end";
+    match.scoreBlue = payload.scoreBlue;
+    match.scoreRed = payload.scoreRed;
+    updateScorePips();
+    if (payload.winner === player.team) {
+      showBanner("ROUND WON", `${payload.scoreBlue} : ${payload.scoreRed}`, ROUND_END_MS - 300, "win");
+      sfx.roundWin();
+    } else if (payload.winner && payload.winner !== "draw") {
+      showBanner("ROUND LOST", `${payload.scoreBlue} : ${payload.scoreRed}`, ROUND_END_MS - 300, "loss");
+      sfx.roundLose();
+    } else {
+      showBanner("ROUND SCRAPPED", "Timer expired — no score", ROUND_END_MS - 300);
+      sfx.roundLose();
+    }
+  });
+
+  bind("match_end", (payload) => {
+    if (!match || !match.online || match.ended) return;
+    match.phase = "matchEnd";
+    match.serverPhase = "match_end";
+    match.scoreBlue = payload.scoreBlue;
+    match.scoreRed = payload.scoreRed;
+    match.ended = true;
+    const won = payload.winner === player.team;
+    const draw = payload.winner === "draw";
+    showBanner(draw ? "STALEMATE" : won ? "VICTORY" : "DEFEAT", `Final ${payload.scoreBlue} : ${payload.scoreRed}`, MATCH_END_MS - 300, won ? "win" : "loss");
+    if (draw) sfx.matchLose();
+    else if (won) sfx.matchWin();
+    else sfx.matchLose();
+    window.setTimeout(() => {
+      if (match?.online) finishMatch();
+    }, Math.min(MATCH_END_MS, 1300));
+  });
+
+  bind("player_left", ({ playerId }) => {
+    const unit = findCombatantById(playerId);
+    if (!unit) return;
+    unit.connected = false;
+    unit.alive = false;
+    unit.hp = 0;
+  });
+
+  bind("player_joined", ({ player }) => {
+    if (!match || !match.online) return;
+    ensureOnlineCombatant(player, combatants.length);
+    syncOnlineRoster([player]);
+  });
+
+  bind("disconnected", () => {
+    if (!match || !match.online || match.ended) return;
+    match.ended = true;
+    window.setTimeout(() => {
+      if (match?.online) finishMatch(true);
+    }, 100);
+  });
+
+  bind("error", (payload) => {
+    if (!match || !match.online) return;
+    console.error("online room error", payload);
+  });
+
+  return () => {
+    unsubs.forEach((unsubscribe) => unsubscribe());
+  };
+}
+
+export function startOnlineMatch({ net, roster, mode, localId, onEnd }) {
+  initRenderer();
+  onEndCallback = onEnd;
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 220);
+  scene.add(camera);
+
+  clockMs = 0;
+  cellOverrides.clear();
+  initFx();
+  buildMap();
+  buildViewmodel();
+  applyQuality();
+  onResize();
+  applyVolume();
+
+  player = makePlayer();
+  player.id = localId;
+  player.online = true;
+  player.connected = true;
+  player.weapons.primary = weaponState("pike");
+  player.weapons.sidearm = weaponState("backstop");
+  player.weapons.melee = weaponState("knife");
+  player.slot = "primary";
+  combatants = [player];
+  grenades = [];
+
+  const roomMode = MODE_DEFS[mode] || MODE_DEFS.duel;
+  match = {
+    online: true,
+    net,
+    roomMode: mode,
+    mode: {
+      id: "botstrike",
+      name: mode === "squad" ? "Online Squad" : "Online Duel",
+      scoreTarget: roomMode.scoreTarget,
+      roundMs: roomMode.roundMs,
+    },
+    scoreBlue: 0,
+    scoreRed: 0,
+    round: 0,
+    phase: "lobby",
+    serverPhase: "lobby",
+    phaseUntilServer: 0,
+    roundEndsAtServer: 0,
+    paused: false,
+    startedAt: performance.now(),
+    utilityHits: 0,
+    feedTimer: 0,
+    targets: [],
+    targetsDown: 0,
+    shotsFired: 0,
+    shotsHit: 0,
+    lastTick: -1,
+    ended: false,
+    cleanupOnline: null,
+  };
+
+  resetOnlineRoundState();
+  syncOnlineRoster(roster);
+  if (!player.team) {
+    const me = roster.find((entry) => entry.id === localId);
+    if (me) player.team = me.team;
+  }
+  match.cleanupOnline = wireOnlineEvents(net);
+
+  document.body.classList.remove("is-client");
+  document.body.classList.add("is-match");
+  hud.root.classList.add("is-active");
+  hud.killFeed.innerHTML = "";
+  pauseOverlay.classList.remove("is-active");
+  updateScorePips();
+  applyCrosshair();
+  hud.objective.style.display = "flex";
+  document.getElementById("hudMatchInfo").style.display = "flex";
+  hud.hint.textContent = "WASD move · SHIFT sprint · SPACE jump · 1/2/3 weapons · 4/5 utility · Q ability · F inspect · R reload · ESC pause";
+  hud.hint.classList.add("is-active");
+  setTimeout(() => hud.hint.classList.remove("is-active"), 6500);
+
+  startAmbient();
+  bindMatchInput();
+  refreshViewmodel();
+  requestLock();
 
   lastFrame = performance.now();
   cancelAnimationFrame(animId);
@@ -982,6 +1439,9 @@ function beginRound() {
       unit.surgeUntil = 0;
       unit.pulseUntil = 0;
       unit.blindUntil = 0;
+      unit.meleeUntil = 0;
+      unit.meleeAnimUntil = 0;
+      unit.inspectUntil = 0;
       placeAtSpawn(unit, blue[b], 0); b += 1;
     } else {
       unit.blindUntil = 0;
@@ -1034,7 +1494,35 @@ function endMatch() {
 
 function finishMatch(aborted = false) {
   const m = match;
-  const report = m.mode.id === "range"
+  const report = m.online
+    ? {
+      mode: "botstrike",
+      online: true,
+      onlineMode: m.roomMode,
+      aborted,
+      result: m.scoreBlue === m.scoreRed ? "draw" : player.team === "blue"
+        ? m.scoreBlue > m.scoreRed ? "win" : "loss"
+        : m.scoreRed > m.scoreBlue ? "win" : "loss",
+      scoreBlue: m.scoreBlue,
+      scoreRed: m.scoreRed,
+      rounds: m.round,
+      kills: player.kills,
+      deaths: player.deaths,
+      headshots: player.headshots,
+      damage: Math.round(player.damage),
+      utilityHits: 0,
+      durationMs: performance.now() - m.startedAt,
+      board: combatants.map((u) => ({
+        name: u.name,
+        you: !!u.isPlayer,
+        team: u.team,
+        agent: u.agent ? u.agent.name : "",
+        kills: u.kills,
+        deaths: u.deaths,
+        damage: Math.round(u.damage || 0),
+      })).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths),
+    }
+    : m.mode.id === "range"
     ? {
       mode: "range",
       targets: m.targetsDown,
@@ -1045,6 +1533,7 @@ function finishMatch(aborted = false) {
     }
     : {
       mode: "botstrike",
+      offlineVariant: m.mode.id,
       aborted,
       result: m.scoreBlue > m.scoreRed ? "win" : "loss",
       scoreBlue: m.scoreBlue,
@@ -1069,6 +1558,7 @@ function finishMatch(aborted = false) {
 }
 
 function teardown() {
+  const currentMatch = match;
   cancelAnimationFrame(animId);
   unbindMatchInput();
   if (document.pointerLockElement) document.exitPointerLock();
@@ -1078,6 +1568,8 @@ function teardown() {
   hud.flashOverlay.style.opacity = "0";
   hud.vignette.style.opacity = "0";
   document.body.classList.remove("is-match");
+  currentMatch?.cleanupOnline?.();
+  if (currentMatch?.online) currentMatch.net?.destroy?.();
   match = null;
 
   // Dispose scene resources.
@@ -1177,9 +1669,11 @@ function onKeyDown(e) {
   if (key === "r") tryReload();
   if (key === "1") switchSlot("primary");
   if (key === "2") switchSlot("sidearm");
-  if (key === "3") throwUtility("frag");
-  if (key === "4") throwUtility("flash");
-  if (key === "q") useAbility();
+  if (key === "3") switchSlot("melee");
+  if (!isOnlineMatch() && key === "4") throwUtility("frag");
+  if (!isOnlineMatch() && key === "5") throwUtility("flash");
+  if (!isOnlineMatch() && key === "q") useAbility();
+  if (key === "f" && activeWeapon()?.id === "knife") knifeInspect();
 }
 
 function onKeyUp(e) {
@@ -1197,8 +1691,19 @@ function onMouseMove(e) {
 function onMouseDown(e) {
   if (!match) return;
   if (e.button === 0) {
+    if (activeWeapon()?.id === "knife") {
+      if (document.pointerLockElement !== canvas && !match.paused) requestLock();
+      playerMelee("slash");
+      return;
+    }
     mouseDown = true;
     if (document.pointerLockElement !== canvas && !match.paused) requestLock();
+    return;
+  }
+  if (e.button === 2 && activeWeapon()?.id === "knife") {
+    e.preventDefault();
+    if (document.pointerLockElement !== canvas && !match.paused) requestLock();
+    playerMelee("stab");
   }
 }
 
@@ -1219,6 +1724,7 @@ function bindMatchInput() {
   window.addEventListener("mousemove", onMouseMove);
   window.addEventListener("mousedown", onMouseDown);
   window.addEventListener("mouseup", onMouseUp);
+  window.addEventListener("contextmenu", blockContextMenu);
   document.addEventListener("pointerlockchange", onLockChange);
 }
 
@@ -1228,10 +1734,15 @@ function unbindMatchInput() {
   window.removeEventListener("mousemove", onMouseMove);
   window.removeEventListener("mousedown", onMouseDown);
   window.removeEventListener("mouseup", onMouseUp);
+  window.removeEventListener("contextmenu", blockContextMenu);
   document.removeEventListener("pointerlockchange", onLockChange);
   keysDown.clear();
   mouseDown = false;
   pointerLockWanted = false;
+}
+
+function blockContextMenu(event) {
+  if (match) event.preventDefault();
 }
 
 /* --------------------------------------------------------------- pause --- */
@@ -1256,6 +1767,10 @@ export function closePause() {
 
 export function restartMatchFromPause() {
   if (!match) return;
+  if (match.online) {
+    exitMatchFromPause();
+    return;
+  }
   const modeId = match.mode.id;
   const end = onEndCallback;
   teardown();
@@ -1264,6 +1779,10 @@ export function restartMatchFromPause() {
 
 export function exitMatchFromPause() {
   if (!match) return;
+  if (match.online) {
+    finishMatch(true);
+    return;
+  }
   if (match.mode.id === "range") {
     finishMatch();
   } else {
@@ -1280,8 +1799,12 @@ function activeWeapon() {
 function switchSlot(slot) {
   if (player.slot === slot || !player.alive) return;
   player.slot = slot;
+  player.inspectUntil = 0;
   const w = activeWeapon();
   w.reloadingUntil = 0;
+  if (isOnlineMatch()) {
+    match.net.sendSwitchWeapon(w.id);
+  }
   sfx.uiClick();
   refreshViewmodel();
 }
@@ -1295,9 +1818,11 @@ function refreshViewmodel() {
 
 function tryReload() {
   const w = activeWeapon();
+  if (w.id === "knife") return;
   if (!player.alive || w.reloadingUntil > nowMs()) return;
   if (w.mag >= w.def.mag || w.reserve <= 0) return;
   w.reloadingUntil = nowMs() + w.def.reloadMs;
+  if (isOnlineMatch()) match.net.sendReload();
   sfx.reload();
 }
 
@@ -1313,6 +1838,7 @@ function finishReloadIfDue(w) {
 
 function playerShoot() {
   const w = activeWeapon();
+  if (isOnlineMatch() && w.id === "knife") return;
   finishReloadIfDue(w);
   if (w.reloadingUntil > nowMs()) return;
   if (nowMs() - w.lastShot < w.def.cooldownMs) return;
@@ -1333,11 +1859,29 @@ function playerShoot() {
   spread *= rand(0.6, 1.15);
 
   const eyeY = player.y + 1.62;
-  const dirX = Math.sin(player.yaw) * -1;
-  const dirZ = Math.cos(player.yaw) * -1;
   // Build direction from yaw/pitch with random spread.
   const dir = new THREE.Vector3(0, 0, -1)
     .applyEuler(new THREE.Euler(player.pitch + rand(-spread, spread), player.yaw + rand(-spread, spread), 0, "YXZ"));
+
+  if (isOnlineMatch()) {
+    match.net.sendFire({
+      ox: player.x,
+      oy: eyeY,
+      oz: player.z,
+      dx: dir.x,
+      dy: dir.y,
+      dz: dir.z,
+      weapon: w.id,
+    });
+    sfx.shot(w.def.kind);
+    kickCamera(w.def);
+    flashMuzzle();
+    const wallDist = wallRay(player.x, eyeY, player.z, dir.x, dir.y, dir.z, w.def.range);
+    const from = new THREE.Vector3(player.x + dir.x * 0.6, eyeY - 0.09 + dir.y * 0.6, player.z + dir.z * 0.6);
+    const to = new THREE.Vector3(player.x + dir.x * wallDist, eyeY + dir.y * wallDist, player.z + dir.z * wallDist);
+    spawnTracer(from, to);
+    return;
+  }
 
   const result = hitscan(player.x, eyeY, player.z, dir.x, dir.y, dir.z, w.def.range, player);
 
@@ -1363,6 +1907,53 @@ function playerShoot() {
     popTarget(result.target);
   }
   return;
+}
+
+function knifeInspect() {
+  if (!player.alive || activeWeapon().id !== "knife") return;
+  player.inspectUntil = nowMs() + 720;
+}
+
+function playerMelee(kind) {
+  if (!player.alive) return;
+  if (activeWeapon().id !== "knife") return;
+  const gateMs = kind === "stab" ? KNIFE_STATS.stab.cooldownMs : KNIFE_STATS.slash.cooldownMs;
+  if (nowMs() < player.meleeUntil) return;
+  player.meleeUntil = nowMs() + gateMs;
+  player.inspectUntil = 0;
+  player.meleeAnimKind = kind;
+  player.meleeAnimUntil = nowMs() + gateMs;
+  const dir = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(player.pitch, player.yaw, 0, "YXZ"));
+  if (isOnlineMatch()) {
+    match.net.sendMelee(kind, {
+      ox: player.x,
+      oy: player.y + 1.62,
+      oz: player.z,
+      dx: dir.x,
+      dy: dir.y,
+      dz: dir.z,
+    });
+    return;
+  }
+
+  const spec = KNIFE_STATS[kind];
+  let best = null;
+  for (const unit of combatants) {
+    if (unit.isPlayer || !unit.alive || unit.team === player.team) continue;
+    const dist = Math.hypot(unit.x - player.x, unit.z - player.z) - BODY_RADIUS;
+    if (dist > spec.range) continue;
+    if (!withinFacingCone(player, unit, spec.coneDeg)) continue;
+    if (!hasLos(player.x, player.y + 1.62, player.z, unit.x, unit.y + 1.1, unit.z)) continue;
+    if (!best || dist < best.dist) best = { unit, dist };
+  }
+  if (!best) return;
+  let damage = spec.damage;
+  if (kind === "stab" && isBackstab(player, best.unit)) {
+    damage *= KNIFE_STATS.stab.backstabMultiplier;
+  }
+  dealDamage(player, best.unit, damage, false);
+  showHitmarker(false, best.unit.hp <= 0);
+  sfx.hit();
 }
 
 // One ray against walls, units, and range targets. Returns nearest hit.
@@ -1477,7 +2068,7 @@ function killUnit(attacker, victim, head) {
 }
 
 function checkRoundEnd() {
-  if (!match || match.mode.id !== "botstrike" || match.phase !== "live") return;
+  if (!match || (match.mode.id !== "botstrike" && match.mode.id !== "duelbot") || match.phase !== "live") return;
   const blueAlive = combatants.some((u) => u.team === "blue" && u.alive);
   const redAlive = combatants.some((u) => u.team === "red" && u.alive);
   if (blueAlive && redAlive) return;
@@ -1497,6 +2088,7 @@ function popTarget(target) {
 /* ------------------------------------------------------------- utility --- */
 
 function throwUtility(kind) {
+  if (isOnlineMatch()) return;
   if (!player.alive) return;
   const def = UTILITY[kind];
   const count = kind === "frag" ? player.frags : player.flashes;
@@ -1605,6 +2197,7 @@ function detonate(g) {
 /* ------------------------------------------------------------ abilities -- */
 
 function useAbility() {
+  if (isOnlineMatch()) return;
   if (!player.alive || nowMs() < player.abilityReadyAt) { if (nowMs() < player.abilityReadyAt) sfx.uiDeny(); return; }
   const ability = player.agent.ability;
   player.abilityReadyAt = nowMs() + ability.cooldownMs;
@@ -1690,8 +2283,8 @@ function updatePlayer(dt) {
   if (nowMs() < player.surgeUntil) speed *= 1.4;
 
   const sin = Math.sin(player.yaw); const cos = Math.cos(player.yaw);
-  const wx = (ix * cos - iz * sin) * speed;
-  const wz = (iz * cos + ix * sin) * speed;
+  const wx = (ix * cos + iz * sin) * speed;
+  const wz = (iz * cos - ix * sin) * speed;
 
   const grounded = player.y <= groundAt(player.x, player.z, player.y) + 0.02;
   const control = grounded ? 1 : 0.5;
@@ -1735,6 +2328,19 @@ function updatePlayer(dt) {
   camera.rotation.set(player.pitch + (player.kickPitch || 0), player.yaw, 0, "YXZ");
   updateViewmodel(dt, moveMag, grounded);
   decayKick(dt);
+
+  if (isOnlineMatch()) {
+    match.net.setInputState({
+      x: player.x,
+      y: player.y,
+      z: player.z,
+      yaw: player.yaw,
+      pitch: THREE.MathUtils.radToDeg(player.pitch),
+      vx: player.velX || 0,
+      vz: player.velZ || 0,
+      anim: moveMag > 0.35 ? "run" : "idle",
+    });
+  }
 }
 
 function moveWithCollision(entity, dx, dz) {
@@ -1769,9 +2375,45 @@ function updateViewmodel(dt, moveMag, grounded) {
   viewmodel.position.z = -0.46 + (player.kickBack || 0);
   viewmodel.rotation.x = reloading ? -0.5 : 0;
   viewmodel.rotation.z = bobX * 2;
-  hud.reloadNote.classList.toggle("is-active", reloading);
 
-  const { muzzleSprite, muzzleLight } = viewmodel.userData;
+  const {
+    rigs,
+    muzzleSprite,
+    muzzleLight,
+  } = viewmodel.userData;
+  const knifeRig = rigs.knife?.group;
+  if (knifeRig && w.id === "knife") {
+    const stabProgress = player.meleeAnimKind === "stab" && player.meleeAnimUntil > nowMs()
+      ? 1 - ((player.meleeAnimUntil - nowMs()) / KNIFE_STATS.stab.cooldownMs)
+      : 0;
+    const slashProgress = player.meleeAnimKind === "slash" && player.meleeAnimUntil > nowMs()
+      ? 1 - ((player.meleeAnimUntil - nowMs()) / KNIFE_STATS.slash.cooldownMs)
+      : 0;
+    const inspectProgress = player.inspectUntil > nowMs()
+      ? 1 - ((player.inspectUntil - nowMs()) / 720)
+      : 0;
+    const slashArc = slashProgress > 0 ? Math.sin(Math.min(1, slashProgress) * Math.PI) : 0;
+    const stabArc = stabProgress > 0 ? Math.sin(Math.min(1, stabProgress) * Math.PI) : 0;
+    const inspectSpin = inspectProgress > 0 ? Math.sin(inspectProgress * Math.PI) : 0;
+    knifeRig.position.set(
+      0.04 + slashArc * 0.12 + inspectSpin * 0.02,
+      -0.04 - stabArc * 0.12,
+      0.1 - stabArc * 0.26,
+    );
+    knifeRig.rotation.set(
+      0.2 - slashArc * 0.48 - stabArc * 0.9,
+      0.6 + slashArc * 1.25,
+      0.18 + inspectSpin * Math.PI * 1.4 - slashArc * 0.2,
+    );
+    hud.reloadNote.classList.remove("is-active");
+  } else {
+    if (knifeRig) {
+      knifeRig.position.set(0.04, -0.04, 0.1);
+      knifeRig.rotation.set(0.2, 0.6, 0.18);
+    }
+    hud.reloadNote.classList.toggle("is-active", reloading);
+  }
+
   if (muzzleSprite.visible) {
     muzzleSprite.userData.life -= dt;
     muzzleLight.intensity = Math.max(0, muzzleSprite.userData.life * 260);
@@ -1805,15 +2447,16 @@ function decayKick(dt) {
 }
 
 function updateSpectateCamera(dt) {
-  const ally = combatants.find((u) => u.team === "blue" && !u.isPlayer && u.alive);
-  if (!ally) return;
+  const target = combatants.find((u) => !u.isPlayer && u.team === player.team && u.alive)
+    || combatants.find((u) => !u.isPlayer && u.alive);
+  if (!target) return;
   const behind = 2.6;
-  const tx = ally.x + Math.sin(ally.yaw) * behind;
-  const tz = ally.z + Math.cos(ally.yaw) * behind;
+  const tx = target.x + Math.sin(target.yaw) * behind;
+  const tz = target.z + Math.cos(target.yaw) * behind;
   camera.position.x = lerp(camera.position.x, tx, dt * 4);
-  camera.position.y = lerp(camera.position.y, ally.y + 2.2, dt * 4);
+  camera.position.y = lerp(camera.position.y, target.y + 2.2, dt * 4);
   camera.position.z = lerp(camera.position.z, tz, dt * 4);
-  const targetYaw = ally.yaw;
+  const targetYaw = target.yaw;
   camera.rotation.set(-0.18, targetYaw, 0, "YXZ");
 }
 
@@ -2060,6 +2703,34 @@ function updateBot(bot, dt) {
   }
 }
 
+function updateRemotePlayer(unit, dt) {
+  if (!unit.rig) return;
+  if (!unit.connected) {
+    unit.rig.group.visible = false;
+    return;
+  }
+  unit.rig.group.visible = true;
+  if (!unit.alive) {
+    if (unit.deadFall < 1) {
+      unit.deadFall = Math.min(1, unit.deadFall + dt * 3);
+      unit.rig.group.rotation.z = unit.deadFall * (Math.PI / 2) * 0.96;
+      unit.rig.group.position.y = -unit.deadFall * 0.18;
+    }
+  } else {
+    unit.deadFall = 0;
+    unit.rig.group.position.y = 0;
+    unit.rig.group.rotation.z = 0;
+  }
+  unit.rig.group.position.x = unit.x;
+  unit.rig.group.position.z = unit.z;
+  unit.rig.group.rotation.y = unit.yaw + Math.PI;
+  unit.animT += dt * (unit.moving ? 9 : 1.2);
+  const swing = Math.sin(unit.animT) * (unit.moving ? 0.55 : 0.04);
+  unit.rig.legL.rotation.x = swing;
+  unit.rig.legR.rotation.x = -swing;
+  unit.rig.armL.rotation.x = -swing * 0.6;
+}
+
 /* ----------------------------------------------------------------- HUD --- */
 
 function updateScorePips() {
@@ -2102,7 +2773,15 @@ function addKillFeed(attacker, victim, head) {
   const vCls = victim.team === "blue" ? "feed-blue" : "feed-red";
   const aName = attacker.isPlayer ? "You" : attacker.name;
   const vName = victim.isPlayer ? "You" : victim.name;
-  row.innerHTML = `<b class="${aCls}">${aName}</b><span>${head ? "⦿" : "▸"}</span><b class="${vCls}">${vName}</b>`;
+  const attackerNode = document.createElement("b");
+  attackerNode.className = aCls;
+  attackerNode.textContent = aName;
+  const markerNode = document.createElement("span");
+  markerNode.textContent = head ? "⦿" : "▸";
+  const victimNode = document.createElement("b");
+  victimNode.className = vCls;
+  victimNode.textContent = vName;
+  row.append(attackerNode, markerNode, victimNode);
   hud.killFeed.prepend(row);
   while (hud.killFeed.children.length > 5) hud.killFeed.lastChild.remove();
   setTimeout(() => { row.classList.add("is-fading"); setTimeout(() => row.remove(), 500); }, 4200);
@@ -2125,8 +2804,8 @@ function updateHud(dt) {
   hud.shieldWrap.style.display = player.shield > 0 ? "block" : "none";
   hud.shield.style.width = `${clamp(player.shield * 2, 0, 100)}%`;
 
-  hud.ammo.textContent = w.reloadingUntil > nowMs() ? "--" : String(w.mag);
-  hud.reserve.textContent = `/ ${w.reserve}`;
+  hud.ammo.textContent = w.id === "knife" ? "--" : w.reloadingUntil > nowMs() ? "--" : String(w.mag);
+  hud.reserve.textContent = w.id === "knife" ? "" : `/ ${w.reserve}`;
   hud.weapon.textContent = w.def.name;
   hud.frag.textContent = String(player.frags);
   hud.frag.parentElement.classList.toggle("is-empty", player.frags <= 0);
@@ -2135,11 +2814,26 @@ function updateHud(dt) {
 
   const ability = player.agent.ability;
   const cdLeft = Math.max(0, player.abilityReadyAt - nowMs());
-  hud.abilityName.textContent = ability.name;
-  hud.abilityIcon.style.setProperty("--cd", String(1 - cdLeft / ability.cooldownMs));
-  hud.abilityIcon.classList.toggle("is-ready", cdLeft <= 0);
+  hud.abilityName.textContent = isOnlineMatch() ? "Online" : ability.name;
+  hud.abilityIcon.style.setProperty("--cd", String(isOnlineMatch() ? 0 : 1 - cdLeft / ability.cooldownMs));
+  hud.abilityIcon.classList.toggle("is-ready", !isOnlineMatch() && cdLeft <= 0);
 
-  if (match.mode.id === "botstrike") {
+  if (isOnlineMatch()) {
+    let remain = 0;
+    if (match.phase === "live") remain = Math.max(0, match.roundEndsAtServer - Date.now());
+    else if (match.phase === "freeze") remain = Math.max(0, match.phaseUntilServer - Date.now());
+    if (match.phase === "lobby") {
+      hud.timer.textContent = "WAIT";
+      hud.timer.classList.remove("is-low");
+    } else {
+      const s = Math.ceil(remain / 1000);
+      hud.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      hud.timer.classList.toggle("is-low", match.phase === "live" && s <= 15);
+    }
+    hud.objective.textContent = match.roomCode
+      ? `${match.mode.name} room ${match.roomCode}`
+      : `${match.mode.name} server-auth`;
+  } else if (match.mode.id === "botstrike" || match.mode.id === "duelbot") {
     let remain;
     if (match.phase === "live") remain = Math.max(0, match.roundEndsAt - nowMs());
     else if (match.phase === "freeze") remain = match.mode.roundMs;
@@ -2147,8 +2841,9 @@ function updateHud(dt) {
     const s = Math.ceil(remain / 1000);
     hud.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
     hud.timer.classList.toggle("is-low", match.phase === "live" && s <= 15);
+    hud.objective.textContent = "";
   } else {
-    hud.objective.innerHTML = `<b>${match.targetsDown}</b> targets · ${match.shotsFired ? Math.round((match.shotsHit / match.shotsFired) * 100) : 0}% accuracy`;
+    hud.objective.textContent = `${match.targetsDown} targets · ${match.shotsFired ? Math.round((match.shotsHit / match.shotsFired) * 100) : 0}% accuracy`;
   }
 
   // Freeze countdown ticks in the banner subtitle.
@@ -2215,7 +2910,7 @@ function updateRadar() {
 
   for (const unit of combatants) {
     if (unit.isPlayer || !unit.alive) continue;
-    if (unit.team === "blue") {
+    if (unit.team === player.team) {
       drawBlip(unit.x, unit.z, "#3bd0c2");
     } else {
       const pulsed = nowMs() < player.pulseUntil;
@@ -2254,7 +2949,7 @@ function frame(t) {
     clockMs += dt * 1000;
 
     // Phase transitions.
-    if (match.mode.id === "botstrike") {
+    if (!isOnlineMatch() && match.mode.id === "botstrike") {
       if (match.phase === "freeze" && nowMs() >= match.phaseUntil) {
         match.phase = "live";
         showBanner("LIVE", "", 700, "win");
@@ -2284,10 +2979,14 @@ function frame(t) {
     }
 
     updatePlayer(dt);
-    for (const unit of combatants) {
-      if (!unit.isPlayer) updateBot(unit, dt);
+    if (isOnlineMatch()) {
+      syncOnlineSnapshot(match.net.sampleSnapshots(performance.now()));
     }
-    updateGrenades(dt);
+    for (const unit of combatants) {
+      if (unit.isRemote) updateRemotePlayer(unit, dt);
+      else if (!unit.isPlayer) updateBot(unit, dt);
+    }
+    if (!isOnlineMatch()) updateGrenades(dt);
     if (match.targets.length) updateTargets(dt);
     updateFx(dt);
     updateHud(dt);

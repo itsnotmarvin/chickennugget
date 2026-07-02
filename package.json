@@ -1,0 +1,12 @@
+{
+  "name": "angle-protocol",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "node scripts/dev-web.mjs",
+    "dev:api": "node scripts/run-wrangler.mjs dev --config server/wrangler.jsonc --port 8787",
+    "dev": "node scripts/dev.mjs",
+    "check": "node scripts/check.mjs",
+    "deploy:api": "node scripts/run-wrangler.mjs deploy --config server/wrangler.jsonc"
+  }
+}

@@ -8,6 +8,7 @@ const SAVE_KEY = "angleProtocolSave_v1";
 const DEFAULTS = {
   version: 1,
   callsign: "Aegis",
+  onlineRegion: "auto",
   motto: "Hold the angle. Break the round.",
   tone: "Neon noir",
   agent: "aegis",

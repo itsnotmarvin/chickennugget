@@ -1,0 +1,21 @@
+{
+  "name": "angle-protocol",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MATCHMAKER", "class_name": "MatchmakerDO" },
+      { "name": "ROOM", "class_name": "RoomDO" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MatchmakerDO", "RoomDO"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

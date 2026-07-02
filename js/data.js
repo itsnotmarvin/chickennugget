@@ -1,5 +1,7 @@
 // Static game data for Angle Protocol.
 
+export { CELL_SIZE, MAP_GRID } from "../shared/map-data.js";
+
 export const WEAPONS = {
   pike: {
     id: "pike",
@@ -388,6 +390,15 @@ export const MODES = {
     scoreTarget: 4,
     roundMs: 90000,
   },
+  duelbot: {
+    id: "duelbot",
+    name: "Bot Duel",
+    tag: "Solo duel",
+    body: "You versus one hostile bot. First to 4 round wins takes the match.",
+    players: "1 player + 1 bot",
+    scoreTarget: 4,
+    roundMs: 90000,
+  },
   range: {
     id: "range",
     name: "Training Range",
@@ -405,37 +416,6 @@ export const MAP_INFO = {
   tempo: "Long mid control",
   body: "A dusk-lit casting hall: one long mid lane, two crate-choked flanks, and a stack of jump-up angles.",
 };
-
-// Foundry layout. Each character is a 2x2m cell.
-//   #  high wall (4m)      P  pillar (4m, slim)
-//   B  tall stack (2.2m)   c  low crate (1.1m, can jump on top)
-//   o  drum cluster (1.2m) .  open floor
-//   1  blue spawn          2  red spawn
-export const MAP_GRID = [
-  "###############################",
-  "#..........c.......c..........#",
-  "#.....c...............c.......#",
-  "#.....c....P.........P..c.....#",
-  "#..........................o..#",
-  "#..BB...cc......P.....cc......#",
-  "#..BB.......................BB#",
-  "#....o.....###..###.....o.....#",
-  "#..........#......#...........#",
-  "#1.c...P...#......#...P...c..2#",
-  "#1.c.......#......#.......c..2#",
-  "#1.c...P...#......#...P...c..2#",
-  "#..........#......#...........#",
-  "#....o.....###..###.....o.....#",
-  "#..BB.......................BB#",
-  "#..BB...cc......P.....cc......#",
-  "#..o..........................#",
-  "#.....c....P.........P..c.....#",
-  "#.....c...............c.......#",
-  "#..........c.......c..........#",
-  "###############################",
-];
-
-export const CELL_SIZE = 2;
 
 export const XP_RULES = {
   kill: 55,

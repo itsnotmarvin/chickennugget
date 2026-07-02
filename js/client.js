@@ -1,5 +1,5 @@
-// Angle Protocol — client shell. Screen routing, customization, contracts,
-// collection, settings, onboarding, and the post-match results → rewards flow.
+// Angle Protocol — client shell. Lobby flow, customization, progression, and
+// online matchmaking/private-room wiring.
 
 import {
   WEAPONS, AGENTS, SKINS, CROSSHAIR_COLORS, TITLES, CONTRACTS, MODES, MAP_INFO,
@@ -9,25 +9,99 @@ import {
   state, save, resetProgress, levelInfo, rankName, titleName, contractTier,
   isUnlocked, unlockRuleLabel, unlockSnapshot, diffUnlocks, recordMatch,
 } from "./state.js";
+import { REGION_ENDPOINTS } from "./config.js";
 import { sfx, unlockAudio, applyVolume } from "./audio.js";
-import { startMatch, isMatchActive } from "./engine.js";
+import { startMatch, startOnlineMatch, isMatchActive } from "./engine.js";
+import * as net from "./net.js";
 
 const $ = (id) => document.getElementById(id);
 
-let selectedMode = "botstrike";
+const CONSENT_KEY = "angleConsent_v1";
+const DEFAULT_CALLSIGN = "Aegis";
+const DEFAULT_MOTTO = "Hold the angle. Break the round.";
+const LOBBY_MODES = Object.freeze({
+  random_duel: {
+    id: "random_duel",
+    name: "Random 1v1",
+    playLabel: "PLAY",
+    status: "Queue into the 1v1 ladder. First to 4 rounds.",
+    kind: "queue",
+    queueMode: "duel",
+  },
+  random_squad: {
+    id: "random_squad",
+    name: "Random 2v2",
+    playLabel: "PLAY",
+    status: "Queue into a live 2v2. First to 4 rounds.",
+    kind: "queue",
+    queueMode: "squad",
+  },
+  bot_squad: {
+    id: "bot_squad",
+    name: "2v2 vs Bots",
+    playLabel: "PLAY",
+    status: "Launch the existing local Bot Strike 2v2.",
+    kind: "offline",
+    offlineMode: "botstrike",
+  },
+  private_room: {
+    id: "private_room",
+    name: "Private Room",
+    playLabel: "CREATE PRIVATE ROOM",
+    status: "Create a room or join one by invite code.",
+    kind: "private",
+  },
+  practice: {
+    id: "practice",
+    name: "Practice",
+    playLabel: "PLAY",
+    status: "Run the offline Training Range.",
+    kind: "offline",
+    offlineMode: "range",
+  },
+});
+
+let selectedMode = "random_duel";
+let selectedRegion = state.onlineRegion || "auto";
+const subtabState = {
+  loadout: "overview",
+  profile: "overview",
+};
+
+const onlineState = {
+  pendingAction: null,
+  queueMode: null,
+  queueNeeded: 0,
+  queueWaiting: 0,
+  queueStartedAt: 0,
+  roomState: null,
+  roomRoster: [],
+  selfId: null,
+  matchBooting: false,
+  toastTimer: 0,
+  botOfferCountdownId: 0,
+  botOfferEndsAt: 0,
+  roomCode: "",
+  inviteRegion: "uswest",
+  autoJoinInvite: null,
+};
 
 /* ------------------------------------------------------------ boot ------- */
 
 export function boot() {
   wireGlobalUiSounds();
   wireNavigation();
-  wireSquad();
+  wireSubtabs();
   wireLoadout();
+  wireProfile();
   wireContracts();
   wirePlay();
-  wireCollection();
   wireSettings();
+  wireQuickSettings();
   wireResultsButtons();
+  wireConsentModal();
+  wireOnlineFlow();
+  hydrateInviteFromUrl();
   refreshAll();
   runLoadingSequence();
 }
@@ -61,57 +135,199 @@ function showClient() {
   $("loading").classList.remove("is-active");
   document.body.classList.add("is-client");
   document.body.classList.remove("is-match");
+  showPage("play");
   if (!state.onboarded) {
     $("onboarding").classList.add("is-active");
+    return;
   }
+  resumeInviteJoinIfReady();
 }
 
 /* --------------------------------------------------------- navigation ---- */
 
 function showPage(page) {
-  document.querySelectorAll(".nav-tab").forEach((b) => b.classList.toggle("is-active", b.dataset.screen === page));
-  document.querySelectorAll(".client-page").forEach((p) => p.classList.toggle("is-active", p.dataset.page === page));
+  document.querySelectorAll(".nav-tab").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.screen === page);
+  });
+  document.querySelectorAll(".client-page").forEach((panel) => {
+    panel.classList.toggle("is-active", panel.dataset.page === page);
+  });
   refreshAll();
 }
 
+function setSubtab(group, name) {
+  subtabState[group] = name;
+  document.querySelectorAll(`[data-subtab-group='${group}']`).forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.subtab === name);
+  });
+  document.querySelectorAll(`[data-subtab-panel^='${group}:']`).forEach((panel) => {
+    panel.classList.toggle("is-active", panel.dataset.subtabPanel === `${group}:${name}`);
+  });
+}
+
 function wireNavigation() {
-  document.querySelectorAll(".nav-tab").forEach((b) => {
-    b.addEventListener("click", () => { sfx.uiClick(); showPage(b.dataset.screen); });
+  document.querySelectorAll(".nav-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      sfx.uiClick();
+      showPage(button.dataset.screen);
+    });
   });
-  document.querySelectorAll("[data-goto]").forEach((b) => {
-    b.addEventListener("click", () => { sfx.uiClick(); showPage(b.dataset.goto); });
-  });
-  document.querySelectorAll("[data-action='quick-play']").forEach((b) => {
-    b.addEventListener("click", () => { sfx.uiConfirm(); launchMatch(); });
-  });
+
   $("onboardingStart").addEventListener("click", () => {
     sfx.uiConfirm();
     state.onboarded = true;
     save();
     $("onboarding").classList.remove("is-active");
-    selectedMode = "range";
-    launchMatch();
+    selectedMode = "practice";
+    refreshPlay();
+    launchOfflineMode("range");
   });
+
   $("onboardingSkip").addEventListener("click", () => {
     sfx.uiClick();
     state.onboarded = true;
     save();
     $("onboarding").classList.remove("is-active");
+    resumeInviteJoinIfReady();
+  });
+}
+
+function wireSubtabs() {
+  document.querySelectorAll("[data-subtab-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      sfx.uiClick();
+      setSubtab(button.dataset.subtabGroup, button.dataset.subtab);
+    });
   });
 }
 
 function wireGlobalUiSounds() {
   document.body.addEventListener("pointerdown", unlockAudio, { once: true });
   document.body.addEventListener("keydown", unlockAudio, { once: true });
-  document.body.addEventListener("mouseover", (e) => {
+  document.body.addEventListener("mouseover", (event) => {
     if (document.body.classList.contains("is-match")) return;
-    if (e.target.closest("button")) sfx.uiHover();
+    if (event.target.closest("button")) sfx.uiHover();
   });
 }
 
-/* -------------------------------------------------------------- squad ---- */
+/* ------------------------------------------------------------ helpers ---- */
 
-function wireSquad() {
+function clearNode(node) {
+  while (node.firstChild) node.firstChild.remove();
+}
+
+function createEl(tag, options = {}) {
+  const node = document.createElement(tag);
+  if (options.className) node.className = options.className;
+  if (options.text !== undefined) node.textContent = options.text;
+  if (options.attrs) {
+    Object.entries(options.attrs).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) node.setAttribute(key, value);
+    });
+  }
+  return node;
+}
+
+function currentCallsign() {
+  return (state.callsign || DEFAULT_CALLSIGN).trim() || DEFAULT_CALLSIGN;
+}
+
+function validOnlineCallsign() {
+  const name = currentCallsign();
+  return name.length >= 3 && name.length <= 16;
+}
+
+function selectedLobbyMode() {
+  return LOBBY_MODES[selectedMode] || LOBBY_MODES.random_duel;
+}
+
+function regionValueForMatchmaking() {
+  const entry = REGION_ENDPOINTS[selectedRegion] || REGION_ENDPOINTS.auto;
+  return entry.target || entry.id;
+}
+
+function hasOnlineConsent() {
+  try {
+    const raw = localStorage.getItem(CONSENT_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return parsed?.version === 1;
+  } catch {
+    return false;
+  }
+}
+
+function saveOnlineConsent() {
+  localStorage.setItem(CONSENT_KEY, JSON.stringify({
+    version: 1,
+    acceptedAt: Date.now(),
+  }));
+}
+
+function setLobbyStatus(text) {
+  $("lobbyStatus").textContent = text;
+}
+
+function showToast(text) {
+  const toast = $("lobbyToast");
+  toast.textContent = text;
+  toast.hidden = false;
+  clearTimeout(onlineState.toastTimer);
+  onlineState.toastTimer = window.setTimeout(() => {
+    toast.hidden = true;
+  }, 2600);
+}
+
+function setModalVisible(id, visible) {
+  $(id).classList.toggle("is-active", visible);
+}
+
+function dismissOnlineOverlays() {
+  setModalVisible("queueOverlay", false);
+  setModalVisible("botOfferModal", false);
+  setModalVisible("roomLobbyModal", false);
+  stopBotOfferCountdown();
+}
+
+function updateInviteUrl(code = "", region = "") {
+  const url = new URL(window.location.href);
+  if (code) url.searchParams.set("room", code);
+  else url.searchParams.delete("room");
+  if (region) url.searchParams.set("region", region);
+  else url.searchParams.delete("region");
+  window.history.replaceState({}, "", url);
+}
+
+function hydrateInviteFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const room = (params.get("room") || "").trim().toUpperCase();
+  const region = (params.get("region") || "uswest").trim();
+  if (!room) return;
+  selectedMode = "private_room";
+  onlineState.roomCode = room;
+  onlineState.inviteRegion = REGION_ENDPOINTS[region] ? region : "uswest";
+  selectedRegion = onlineState.inviteRegion;
+  onlineState.autoJoinInvite = {
+    code: room,
+    region: onlineState.inviteRegion,
+  };
+}
+
+function resumeInviteJoinIfReady() {
+  if (!onlineState.autoJoinInvite || isMatchActive()) return;
+  if (!validOnlineCallsign()) return;
+  attemptOnlineAction(() => joinPrivateRoom(onlineState.autoJoinInvite.code, onlineState.autoJoinInvite.region));
+}
+
+function startPendingOnlineAction() {
+  const action = onlineState.pendingAction;
+  onlineState.pendingAction = null;
+  if (action) action();
+}
+
+/* -------------------------------------------------------------- profile -- */
+
+function wireProfile() {
   document.querySelectorAll(".agent-card").forEach((card) => {
     card.addEventListener("click", () => {
       sfx.uiClick();
@@ -120,18 +336,22 @@ function wireSquad() {
       refreshAll();
     });
   });
-  $("callsignInput").addEventListener("input", (e) => {
-    state.callsign = e.target.value.trim() || "Aegis";
+
+  $("callsignInput").addEventListener("input", (event) => {
+    state.callsign = event.target.value.trim() || DEFAULT_CALLSIGN;
+    save();
+    refreshIdentity();
+    resumeInviteJoinIfReady();
+  });
+
+  $("squadMotto").addEventListener("input", (event) => {
+    state.motto = event.target.value.trim() || DEFAULT_MOTTO;
     save();
     refreshIdentity();
   });
-  $("squadMotto").addEventListener("input", (e) => {
-    state.motto = e.target.value.trim() || "Hold the angle. Break the round.";
-    save();
-    refreshIdentity();
-  });
-  $("seasonTone").addEventListener("change", (e) => {
-    state.tone = e.target.value;
+
+  $("seasonTone").addEventListener("change", (event) => {
+    state.tone = event.target.value;
     save();
     refreshIdentity();
   });
@@ -147,6 +367,45 @@ function wireLoadout() {
       save();
       refreshAll();
     });
+  });
+
+  $("skinGrid").addEventListener("click", (event) => {
+    const card = event.target.closest("[data-skin]");
+    if (!card) return;
+    if (card.classList.contains("is-locked")) {
+      sfx.uiDeny();
+      return;
+    }
+    sfx.uiClick();
+    state.skin = card.dataset.skin;
+    save();
+    refreshAll();
+  });
+
+  $("crosshairGrid").addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-crosshair]");
+    if (!chip) return;
+    if (chip.classList.contains("is-locked")) {
+      sfx.uiDeny();
+      return;
+    }
+    sfx.uiClick();
+    state.crosshairColor = chip.dataset.crosshair;
+    save();
+    refreshCollection();
+  });
+
+  $("titleGrid").addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-title]");
+    if (!chip) return;
+    if (chip.classList.contains("is-locked")) {
+      sfx.uiDeny();
+      return;
+    }
+    sfx.uiClick();
+    state.title = chip.dataset.title;
+    save();
+    refreshAll();
   });
 }
 
@@ -166,112 +425,522 @@ function wireContracts() {
 /* ---------------------------------------------------------------- play --- */
 
 function wirePlay() {
-  document.querySelectorAll(".mode-card").forEach((card) => {
-    card.addEventListener("click", () => {
+  document.querySelectorAll(".mode-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
       sfx.uiClick();
-      selectedMode = card.dataset.mode;
+      selectedMode = chip.dataset.mode;
+      refreshPlay();
+      if (selectedMode !== "private_room") {
+        onlineState.autoJoinInvite = null;
+        onlineState.roomCode = "";
+        $("privateRoomCode").value = "";
+        $("copyInviteButton").hidden = true;
+        updateInviteUrl("", "");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-region-option]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      sfx.uiClick();
+      selectedRegion = chip.dataset.regionOption;
+      state.onlineRegion = selectedRegion;
+      save();
       refreshPlay();
     });
   });
-  $("startMatch").addEventListener("click", () => { sfx.uiConfirm(); launchMatch(); });
+
+  $("privateRoomCode").addEventListener("input", (event) => {
+    const cleaned = event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
+    event.target.value = cleaned;
+    onlineState.roomCode = cleaned;
+  });
+
+  $("startMatch").addEventListener("click", () => {
+    sfx.uiConfirm();
+    handlePrimaryPlay();
+  });
+
+  $("createPrivateRoom").addEventListener("click", () => {
+    sfx.uiConfirm();
+    attemptOnlineAction(createPrivateRoom);
+  });
+
+  $("joinPrivateRoom").addEventListener("click", () => {
+    sfx.uiConfirm();
+    attemptOnlineAction(() => joinPrivateRoom($("privateRoomCode").value.trim().toUpperCase(), regionValueForMatchmaking()));
+  });
+
+  $("copyInviteButton").addEventListener("click", async () => {
+    sfx.uiClick();
+    await copyInviteLink();
+  });
+
+  $("roomLobbyCopy").addEventListener("click", async () => {
+    sfx.uiClick();
+    await copyInviteLink();
+  });
+
+  $("roomLobbyLeave").addEventListener("click", async () => {
+    sfx.uiClick();
+    await leaveOnlineFlow();
+    dismissOnlineOverlays();
+    setLobbyStatus(selectedLobbyMode().status);
+  });
+
+  $("queueCancelButton").addEventListener("click", async () => {
+    sfx.uiClick();
+    await leaveQueueAndReset();
+  });
+
+  $("botOfferPlay").addEventListener("click", async () => {
+    sfx.uiConfirm();
+    await leaveQueueAndReset(true);
+    launchOfflineMode(onlineState.queueMode === "squad" ? "botstrike" : "duelbot");
+  });
+
+  $("botOfferWait").addEventListener("click", () => {
+    sfx.uiClick();
+    setModalVisible("botOfferModal", false);
+    stopBotOfferCountdown();
+    net.sendKeepWaiting();
+    setLobbyStatus("Keeping the queue alive...");
+  });
+
+  $("botOfferCancel").addEventListener("click", async () => {
+    sfx.uiClick();
+    await leaveQueueAndReset();
+  });
 }
 
-function launchMatch() {
+function handlePrimaryPlay() {
   if (isMatchActive()) return;
   unlockAudio();
-  document.querySelectorAll(".results-layer").forEach((el) => el.classList.remove("is-active"));
-  startMatch({ modeId: selectedMode, onEnd: handleMatchEnd });
+  const mode = selectedLobbyMode();
+  if (mode.kind === "offline") {
+    launchOfflineMode(mode.offlineMode);
+    return;
+  }
+  if (mode.kind === "private") {
+    attemptOnlineAction(createPrivateRoom);
+    return;
+  }
+  attemptOnlineAction(() => joinQueue(mode.queueMode));
 }
 
-/* ---------------------------------------------------------- collection --- */
+function launchOfflineMode(modeId) {
+  document.querySelectorAll(".results-layer").forEach((layer) => layer.classList.remove("is-active"));
+  dismissOnlineOverlays();
+  startMatch({ modeId, onEnd: handleMatchEnd });
+}
 
-function wireCollection() {
-  // Grids are rebuilt on refresh; click handlers are delegated.
-  $("skinGrid").addEventListener("click", (e) => {
-    const card = e.target.closest("[data-skin]");
-    if (!card) return;
-    if (card.classList.contains("is-locked")) { sfx.uiDeny(); return; }
-    sfx.uiClick();
-    state.skin = card.dataset.skin;
-    save();
-    refreshAll();
+function attemptOnlineAction(action) {
+  if (!validOnlineCallsign()) {
+    showToast("Callsign must be 3-16 characters for online play.");
+    return;
+  }
+  if (hasOnlineConsent()) {
+    action();
+    return;
+  }
+  onlineState.pendingAction = action;
+  setModalVisible("onlineConsent", true);
+}
+
+async function joinQueue(queueMode) {
+  await leaveOnlineFlow();
+  dismissOnlineOverlays();
+  onlineState.queueMode = queueMode;
+  onlineState.queueStartedAt = Date.now();
+  onlineState.queueNeeded = queueMode === "squad" ? 4 : 2;
+  onlineState.queueWaiting = 1;
+  setModalVisible("queueOverlay", true);
+  renderQueueStatus();
+  setLobbyStatus(queueMode === "squad" ? "Finding a 2v2 lobby..." : "Finding a duel...");
+  try {
+    await net.joinQueue(regionValueForMatchmaking(), queueMode, currentCallsign());
+  } catch (error) {
+    setModalVisible("queueOverlay", false);
+    showToast(`Queue failed: ${error.message}`);
+    setLobbyStatus(selectedLobbyMode().status);
+  }
+}
+
+async function createPrivateRoom() {
+  await leaveOnlineFlow();
+  dismissOnlineOverlays();
+  setLobbyStatus("Creating private room...");
+  try {
+    const room = await net.createRoom({
+      region: regionValueForMatchmaking(),
+      mode: "duel",
+      name: currentCallsign(),
+    });
+    onlineState.roomCode = room.code;
+    onlineState.inviteRegion = room.region;
+    updateInviteUrl(room.code, room.region);
+    $("privateRoomCode").value = room.code;
+    $("copyInviteButton").hidden = false;
+    await net.joinRoom(room.code, {
+      name: currentCallsign(),
+      region: room.region,
+    });
+    setLobbyStatus(`Private room ${room.code} created.`);
+  } catch (error) {
+    showToast(`Room create failed: ${error.message}`);
+    setLobbyStatus(selectedLobbyMode().status);
+  }
+}
+
+async function joinPrivateRoom(code, region) {
+  if (!code || code.length !== 6) {
+    showToast("Enter a valid 6-character room code.");
+    return;
+  }
+  await leaveOnlineFlow();
+  dismissOnlineOverlays();
+  setLobbyStatus(`Joining room ${code}...`);
+  try {
+    onlineState.roomCode = code;
+    onlineState.inviteRegion = region;
+    updateInviteUrl(code, region);
+    await net.joinRoom(code, {
+      name: currentCallsign(),
+      region,
+    });
+  } catch (error) {
+    showToast(`Room join failed: ${error.message}`);
+    setLobbyStatus(selectedLobbyMode().status);
+  }
+}
+
+async function copyInviteLink() {
+  const code = onlineState.roomCode || $("privateRoomCode").value.trim().toUpperCase();
+  if (!code) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("room", code);
+  url.searchParams.set("region", onlineState.inviteRegion || regionValueForMatchmaking());
+  try {
+    await navigator.clipboard.writeText(url.toString());
+    showToast("Invite link copied.");
+  } catch {
+    showToast("Clipboard unavailable. Copy the URL from the address bar.");
+  }
+}
+
+function renderQueueStatus() {
+  const elapsed = Math.max(0, Math.round((Date.now() - onlineState.queueStartedAt) / 1000));
+  $("queueOverlayStatus").textContent = `Finding opponents… ${onlineState.queueWaiting}/${onlineState.queueNeeded} · ${elapsed}s`;
+}
+
+async function leaveQueueAndReset(playBots = false) {
+  await net.leaveQueue();
+  setModalVisible("queueOverlay", false);
+  setModalVisible("botOfferModal", false);
+  stopBotOfferCountdown();
+  onlineState.queueMode = null;
+  setLobbyStatus(playBots ? "Launching bot match..." : selectedLobbyMode().status);
+}
+
+async function leaveOnlineFlow() {
+  onlineState.roomState = null;
+  onlineState.roomRoster = [];
+  onlineState.selfId = null;
+  onlineState.matchBooting = false;
+  await net.destroy();
+}
+
+function showBotOffer(countdownMs) {
+  onlineState.botOfferEndsAt = Date.now() + countdownMs;
+  setModalVisible("botOfferModal", true);
+  updateBotOfferText();
+  stopBotOfferCountdown();
+  onlineState.botOfferCountdownId = window.setInterval(() => {
+    updateBotOfferText();
+  }, 250);
+}
+
+function stopBotOfferCountdown() {
+  if (onlineState.botOfferCountdownId) {
+    clearInterval(onlineState.botOfferCountdownId);
+    onlineState.botOfferCountdownId = 0;
+  }
+}
+
+function updateBotOfferText() {
+  const seconds = Math.max(0, Math.ceil((onlineState.botOfferEndsAt - Date.now()) / 1000));
+  $("botOfferBody").textContent = `A bot match starts in ${seconds}s. Keep waiting for real players, or jump in against bots now.`;
+  if (seconds > 0) return;
+  setModalVisible("botOfferModal", false);
+  stopBotOfferCountdown();
+  leaveQueueAndReset(true).then(() => {
+    launchOfflineMode(onlineState.queueMode === "squad" ? "botstrike" : "duelbot");
   });
-  $("crosshairGrid").addEventListener("click", (e) => {
-    const chip = e.target.closest("[data-crosshair]");
-    if (!chip) return;
-    if (chip.classList.contains("is-locked")) { sfx.uiDeny(); return; }
-    sfx.uiClick();
-    state.crosshairColor = chip.dataset.crosshair;
-    save();
-    refreshCollection();
+}
+
+function renderRoomLobby() {
+  const room = onlineState.roomState;
+  if (!room || room.phase !== "lobby") return;
+  $("roomLobbyCode").textContent = room.code || "------";
+  $("roomLobbyStatus").textContent = room.mode === "squad"
+    ? "Waiting for four operators."
+    : "Waiting for opponent.";
+  const list = $("roomLobbyPlayers");
+  clearNode(list);
+  room.players.forEach((player) => {
+    const row = createEl("li");
+    const name = createEl("strong", { text: player.name });
+    const meta = createEl("span", {
+      text: player.connected ? `${player.team} ready` : `${player.team} disconnected`,
+    });
+    row.append(name, meta);
+    list.append(row);
   });
-  $("titleGrid").addEventListener("click", (e) => {
-    const chip = e.target.closest("[data-title]");
-    if (!chip) return;
-    if (chip.classList.contains("is-locked")) { sfx.uiDeny(); return; }
-    sfx.uiClick();
-    state.title = chip.dataset.title;
-    save();
-    refreshAll();
+  setModalVisible("roomLobbyModal", true);
+}
+
+function maybeStartOnlineMatch(payload = onlineState.roomState) {
+  // Broadcast room_state carries selfId=null (it is per-recipient on join only),
+  // so resolve our id from the stored value or the welcome message instead.
+  const selfId = payload?.selfId ?? onlineState.selfId ?? net.getWelcome()?.playerId ?? null;
+  if (!payload || !selfId || payload.phase === "lobby" || isMatchActive() || onlineState.matchBooting) return;
+  dismissOnlineOverlays();
+  onlineState.matchBooting = true;
+  startOnlineMatch({
+    net,
+    roster: payload.players,
+    mode: payload.mode,
+    localId: selfId,
+    onEnd: handleMatchEnd,
+  });
+}
+
+/* ------------------------------------------------------------- network --- */
+
+function wireOnlineFlow() {
+  net.on("queue_status", ({ waiting, needed, elapsedMs }) => {
+    onlineState.queueWaiting = waiting;
+    onlineState.queueNeeded = needed;
+    onlineState.queueStartedAt = Date.now() - elapsedMs;
+    renderQueueStatus();
+  });
+
+  net.on("bot_offer", ({ countdownMs }) => {
+    showBotOffer(countdownMs);
+  });
+
+  net.on("match_found", async ({ roomId, ticket, region }) => {
+    setModalVisible("botOfferModal", false);
+    stopBotOfferCountdown();
+    setLobbyStatus("Match found. Joining room...");
+    try {
+      await net.joinRoom(roomId, {
+        name: currentCallsign(),
+        ticket,
+        region,
+      });
+    } catch (error) {
+      showToast(`Match join failed: ${error.message}`);
+      await leaveQueueAndReset();
+    }
+  });
+
+  net.on("room_state", (payload) => {
+    if (payload.selfId) onlineState.selfId = payload.selfId;
+    onlineState.roomState = payload;
+    onlineState.roomRoster = payload.players;
+    onlineState.autoJoinInvite = null;
+    if (payload.code) {
+      onlineState.roomCode = payload.code;
+      $("privateRoomCode").value = payload.code;
+      $("copyInviteButton").hidden = false;
+      updateInviteUrl(payload.code, payload.region);
+    }
+    if (payload.phase === "lobby") {
+      setLobbyStatus(payload.code ? `Room ${payload.code} ready. Waiting for opponent...` : "Waiting for room to fill...");
+      renderRoomLobby();
+      return;
+    }
+    maybeStartOnlineMatch(payload);
+  });
+
+  net.on("player_joined", ({ player }) => {
+    if (!onlineState.roomState?.players) return;
+    const current = onlineState.roomState.players.filter((entry) => entry.id !== player.id);
+    onlineState.roomState.players = [...current, player];
+    if (onlineState.roomState.phase === "lobby") renderRoomLobby();
+  });
+
+  net.on("player_left", ({ playerId }) => {
+    if (!onlineState.roomState?.players) return;
+    onlineState.roomState.players = onlineState.roomState.players.map((entry) => {
+      if (entry.id !== playerId) return entry;
+      return {
+        ...entry,
+        connected: false,
+        alive: false,
+        hp: 0,
+      };
+    });
+    if (onlineState.roomState.phase === "lobby") renderRoomLobby();
+  });
+
+  net.on("round_start", () => {
+    maybeStartOnlineMatch();
+  });
+
+  net.on("error", async ({ code, detail }) => {
+    const message = {
+      room_full: "That room is already full.",
+      room_not_found: "Room not found.",
+      bad_ticket: "Match ticket rejected.",
+      stale_invite: "Invite code expired.",
+      name_invalid: "Callsign must be 3-16 characters.",
+      name_taken: "That callsign is already connected in this room.",
+      rate_limited: "Too many requests. Slow down.",
+      timeout: "Connection timed out.",
+      region_mismatch: "Invite region mismatch.",
+      malformed: "Malformed request.",
+    }[code] || `Online error: ${code}${detail ? ` (${detail})` : ""}`;
+    showToast(message);
+    setLobbyStatus(message);
+    if (!isMatchActive()) {
+      dismissOnlineOverlays();
+      await leaveOnlineFlow();
+    }
+  });
+
+  net.on("disconnected", async ({ expected }) => {
+    if (isMatchActive()) return;
+    dismissOnlineOverlays();
+    if (!expected) {
+      showToast("Disconnected from the match server.");
+      setLobbyStatus("Disconnected from the match server.");
+    }
+    await leaveOnlineFlow();
   });
 }
 
 /* ------------------------------------------------------------ settings --- */
 
 function wireSettings() {
-  const vol = $("settingVolume");
-  vol.addEventListener("input", () => {
-    state.settings.volume = Number(vol.value) / 100;
+  $("settingVolume").addEventListener("input", (event) => {
+    state.settings.volume = Number(event.target.value) / 100;
     applyVolume();
     save();
+    refreshSettings();
   });
-  $("settingMute").addEventListener("change", (e) => {
-    state.settings.muted = e.target.checked;
+
+  $("settingMute").addEventListener("change", (event) => {
+    state.settings.muted = event.target.checked;
     applyVolume();
     save();
+    refreshSettings();
   });
-  const sens = $("settingSens");
-  sens.addEventListener("input", () => {
-    state.settings.sensitivity = Number(sens.value);
-    $("settingSensLabel").textContent = `${Number(sens.value).toFixed(2)}x`;
+
+  $("settingSens").addEventListener("input", (event) => {
+    state.settings.sensitivity = Number(event.target.value);
+    save();
+    refreshSettings();
+  });
+
+  $("settingCrosshairSize").addEventListener("input", (event) => {
+    state.settings.crosshairSize = Number(event.target.value);
+    save();
+    refreshSettings();
+  });
+
+  $("visualQuality").addEventListener("change", (event) => {
+    state.settings.quality = event.target.value;
     save();
   });
-  const ch = $("settingCrosshairSize");
-  ch.addEventListener("input", () => {
-    state.settings.crosshairSize = Number(ch.value);
-    $("settingCrosshairLabel").textContent = `${Number(ch.value).toFixed(2)}x`;
-    save();
-  });
-  $("visualQuality").addEventListener("change", (e) => {
-    state.settings.quality = e.target.value;
-    save();
-  });
-  $("botDifficulty").addEventListener("change", (e) => {
-    state.settings.botDifficulty = e.target.value;
+
+  $("botDifficulty").addEventListener("change", (event) => {
+    state.settings.botDifficulty = event.target.value;
     save();
     refreshPlay();
   });
+
   $("fullscreenToggle").addEventListener("click", () => {
     sfx.uiClick();
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen().catch(() => {});
   });
+
   $("resetProgress").addEventListener("click", () => {
-    if ($("resetProgress").dataset.armed === "1") {
+    const button = $("resetProgress");
+    if (button.dataset.armed === "1") {
       resetProgress();
       sfx.uiConfirm();
-      $("resetProgress").dataset.armed = "0";
-      $("resetProgress").textContent = "Reset Progress";
+      button.dataset.armed = "0";
+      button.textContent = "Reset Progress";
       refreshAll();
-    } else {
-      sfx.uiDeny();
-      $("resetProgress").dataset.armed = "1";
-      $("resetProgress").textContent = "Click again to wipe everything";
-      setTimeout(() => {
-        $("resetProgress").dataset.armed = "0";
-        $("resetProgress").textContent = "Reset Progress";
-      }, 3200);
+      return;
     }
+    sfx.uiDeny();
+    button.dataset.armed = "1";
+    button.textContent = "Click again to wipe everything";
+    setTimeout(() => {
+      button.dataset.armed = "0";
+      button.textContent = "Reset Progress";
+    }, 3200);
+  });
+}
+
+function wireQuickSettings() {
+  const toggle = $("quickSettingsToggle");
+  const panel = $("quickSettingsPanel");
+
+  toggle.addEventListener("click", () => {
+    sfx.uiClick();
+    const open = panel.hidden;
+    panel.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (panel.hidden) return;
+    if (event.target === panel || panel.contains(event.target) || event.target === toggle) return;
+    panel.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+  });
+
+  $("quickSettingVolume").addEventListener("input", (event) => {
+    state.settings.volume = Number(event.target.value) / 100;
+    applyVolume();
+    save();
+    refreshSettings();
+  });
+
+  $("quickSettingMute").addEventListener("change", (event) => {
+    state.settings.muted = event.target.checked;
+    applyVolume();
+    save();
+    refreshSettings();
+  });
+
+  $("quickSettingSens").addEventListener("input", (event) => {
+    state.settings.sensitivity = Number(event.target.value);
+    save();
+    refreshSettings();
+  });
+}
+
+/* ------------------------------------------------------------- consent --- */
+
+function wireConsentModal() {
+  $("consentAccept").addEventListener("click", () => {
+    sfx.uiConfirm();
+    saveOnlineConsent();
+    setModalVisible("onlineConsent", false);
+    startPendingOnlineAction();
+  });
+
+  $("consentDecline").addEventListener("click", () => {
+    sfx.uiClick();
+    onlineState.pendingAction = null;
+    setModalVisible("onlineConsent", false);
+    setLobbyStatus(selectedLobbyMode().status);
   });
 }
 
@@ -279,24 +948,34 @@ function wireSettings() {
 
 function handleMatchEnd(report) {
   document.body.classList.add("is-client");
+  onlineState.matchBooting = false;
+  dismissOnlineOverlays();
   if (report.mode === "botstrike" && report.aborted) {
-    // Left from pause menu — no rewards, straight back to client.
     refreshAll();
+    showPage("play");
+    return;
+  }
+  if (report.online && report.aborted) {
+    refreshAll();
+    showPage("play");
     return;
   }
   const rewards = applyRewards(report);
   showResults(report, rewards);
 }
 
-// Turns a match report into XP, stat updates, contract progress, and unlocks.
 function applyRewards(report) {
   const before = unlockSnapshot();
   const levelBefore = levelInfo().level;
-  const tiersBefore = CONTRACTS.map((c) => contractTier(c.id));
+  const tiersBefore = CONTRACTS.map((contract) => contractTier(contract.id));
 
   const lines = [];
   let xp = 0;
+
   if (report.mode === "botstrike") {
+    const modeLabel = report.online
+      ? report.onlineMode === "squad" ? "Online 2v2" : "Online 1v1"
+      : report.offlineVariant === "duelbot" ? "Bot Duel" : "2v2 vs Bots";
     const killXp = report.kills * XP_RULES.kill;
     const headXp = report.headshots * XP_RULES.headshotBonus;
     const dmgXp = Math.round(report.damage / 100) * XP_RULES.damagePer100;
@@ -327,11 +1006,12 @@ function applyRewards(report) {
     state.contracts.utility.progress += report.utilityHits;
 
     recordMatch({
-      mode: "Bot Strike",
-      result: report.result === "win" ? "Victory" : "Defeat",
+      mode: modeLabel,
+      result: report.result === "win" ? "Victory" : report.result === "draw" ? "Draw" : "Defeat",
       score: `${report.scoreBlue}–${report.scoreRed}`,
       detail: `${report.kills}K ${report.deaths}D · ${report.damage} dmg`,
       date: Date.now(),
+      online: !!report.online,
     });
   } else {
     xp = report.targets ? Math.max(Math.round(report.targets * (XP_RULES.rangeTargetsPer10 / 10)), 10) : 0;
@@ -339,21 +1019,21 @@ function applyRewards(report) {
     state.stats.rangeTargets += report.targets;
     if (report.targets > 0) {
       recordMatch({
-        mode: "Training Range",
+        mode: "Practice",
         result: "Session",
         score: `${report.targets} targets`,
         detail: `${report.accuracy}% accuracy`,
         date: Date.now(),
+        online: false,
       });
     }
   }
 
-  // Contract tier completion bonuses.
-  CONTRACTS.forEach((c, i) => {
-    const nowTier = contractTier(c.id);
-    if (nowTier > tiersBefore[i]) {
-      const gained = (nowTier - tiersBefore[i]) * c.tierXp;
-      lines.push([`${c.name} tier ${nowTier} complete`, gained]);
+  CONTRACTS.forEach((contract, index) => {
+    const nowTier = contractTier(contract.id);
+    if (nowTier > tiersBefore[index]) {
+      const gained = (nowTier - tiersBefore[index]) * contract.tierXp;
+      lines.push([`${contract.name} tier ${nowTier} complete`, gained]);
       xp += gained;
     }
   });
@@ -363,46 +1043,71 @@ function applyRewards(report) {
   const newUnlocks = diffUnlocks(before);
   save();
 
-  return { xp, lines, levelBefore, levelAfter, leveledUp: levelAfter > levelBefore, newUnlocks };
+  return {
+    xp,
+    lines,
+    levelBefore,
+    levelAfter,
+    leveledUp: levelAfter > levelBefore,
+    newUnlocks,
+  };
 }
 
 function showResults(report, rewards) {
   refreshAll();
-  const layer = $("matchResults");
-  layer.classList.add("is-active");
+  setModalVisible("matchResults", true);
 
   if (report.mode === "botstrike") {
-    $("resultsTitle").textContent = report.result === "win" ? "Victory" : "Defeat";
+    const modeLabel = report.online
+      ? report.onlineMode === "squad" ? "Online 2v2" : "Online 1v1"
+      : report.offlineVariant === "duelbot" ? MODES.duelbot.name : MODES.botstrike.name;
+    $("resultsTitle").textContent = report.result === "win" ? "Victory" : report.result === "draw" ? "Draw" : "Defeat";
     $("resultsTitle").className = `results-title ${report.result === "win" ? "is-win" : "is-loss"}`;
     $("resultsScore").textContent = `${report.scoreBlue} — ${report.scoreRed}`;
-    $("resultsMeta").textContent = `${MODES.botstrike.name} · ${MAP_INFO.name} · ${report.rounds} round${report.rounds === 1 ? "" : "s"} · ${Math.floor(report.durationMs / 60000)}m ${Math.round(report.durationMs / 1000) % 60}s`;
-    $("resultsBoard").innerHTML = `
-      <div class="board-row board-head"><span>Operator</span><span>K</span><span>D</span><span>DMG</span></div>
-      ${report.board.map((row) => `
-        <div class="board-row ${row.you ? "is-you" : ""} ${row.team === "blue" ? "is-blue" : "is-red"}">
-          <span>${row.you ? `${escapeHtml(row.name)} (you)` : escapeHtml(row.name)}<em>${row.agent}</em></span>
-          <span>${row.kills}</span><span>${row.deaths}</span><span>${row.damage}</span>
-        </div>`).join("")}
-    `;
+    $("resultsMeta").textContent = `${modeLabel} · ${MAP_INFO.name} · ${report.rounds} round${report.rounds === 1 ? "" : "s"} · ${Math.floor(report.durationMs / 60000)}m ${Math.round(report.durationMs / 1000) % 60}s`;
+    renderResultsBoard(report.board);
   } else {
-    $("resultsTitle").textContent = "Range Session";
+    $("resultsTitle").textContent = "Practice Session";
     $("resultsTitle").className = "results-title is-win";
-    $("resultsScore").textContent = `${report.targets}`;
+    $("resultsScore").textContent = String(report.targets);
     $("resultsMeta").textContent = `Targets down · ${report.accuracy}% accuracy · ${report.shots} shots`;
-    $("resultsBoard").innerHTML = "";
+    clearNode($("resultsBoard"));
   }
+
   window._pendingRewards = rewards;
 }
 
+function renderResultsBoard(board) {
+  const root = $("resultsBoard");
+  clearNode(root);
+
+  const header = createEl("div", { className: "board-row board-head" });
+  ["Operator", "K", "D", "DMG"].forEach((label) => {
+    header.append(createEl("span", { text: label }));
+  });
+  root.append(header);
+
+  board.forEach((row) => {
+    const item = createEl("div", {
+      className: `board-row ${row.you ? "is-you" : ""} ${row.team === "blue" ? "is-blue" : "is-red"}`,
+    });
+    const operator = createEl("span");
+    operator.append(document.createTextNode(row.you ? `${row.name} (you)` : row.name));
+    operator.append(createEl("em", { text: row.agent }));
+    item.append(operator);
+    item.append(createEl("span", { text: String(row.kills) }));
+    item.append(createEl("span", { text: String(row.deaths) }));
+    item.append(createEl("span", { text: String(row.damage) }));
+    root.append(item);
+  });
+}
+
 function showRewards(rewards) {
-  $("matchResults").classList.remove("is-active");
-  const layer = $("matchRewards");
-  layer.classList.add("is-active");
+  setModalVisible("matchResults", false);
+  setModalVisible("matchRewards", true);
 
   $("rewardsXpTotal").textContent = `+${rewards.xp} XP`;
-  $("rewardsLines").innerHTML = rewards.lines
-    .map(([label, amount]) => `<div class="reward-line"><span>${label}</span><b>+${amount} XP</b></div>`)
-    .join("") || `<div class="reward-line"><span>No XP earned this session</span><b>+0</b></div>`;
+  renderRewardLines(rewards.lines);
 
   const info = levelInfo();
   $("rewardsLevel").textContent = `Level ${info.level}`;
@@ -416,66 +1121,102 @@ function showRewards(rewards) {
     sfx.levelUp();
   }
 
-  const unlockable = rewards.newUnlocks.map((u) => {
-    if (u.type === "skin") {
-      const skin = SKINS.find((s) => s.id === u.id);
-      return { label: skin ? skin.name : u.id, kind: "Sidearm skin" };
-    }
-    if (u.type === "crosshair") {
-      const c = CROSSHAIR_COLORS.find((x) => x.id === u.id);
-      return { label: c ? c.name : u.id, kind: "Crosshair color" };
-    }
-    const t = TITLES.find((x) => x.id === u.id);
-    return { label: t ? t.name : u.id, kind: "Title" };
+  renderRewardUnlocks(rewards.newUnlocks);
+  renderRewardContract();
+}
+
+function renderRewardLines(lines) {
+  const root = $("rewardsLines");
+  clearNode(root);
+  if (!lines.length) {
+    const empty = createEl("div", { className: "reward-line" });
+    empty.append(createEl("span", { text: "No XP earned this session" }));
+    empty.append(createEl("b", { text: "+0" }));
+    root.append(empty);
+    return;
+  }
+  lines.forEach(([label, amount]) => {
+    const row = createEl("div", { className: "reward-line" });
+    row.append(createEl("span", { text: label }));
+    row.append(createEl("b", { text: `+${amount} XP` }));
+    root.append(row);
   });
-  $("rewardsUnlocks").innerHTML = unlockable.length
-    ? unlockable.map((u) => `<div class="unlock-card"><span>${u.kind}</span><b>${u.label}</b></div>`).join("")
-    : "";
+}
+
+function renderRewardUnlocks(unlocks) {
+  const root = $("rewardsUnlocks");
+  clearNode(root);
+
+  const unlockable = unlocks.map((unlock) => {
+    if (unlock.type === "skin") {
+      const skin = SKINS.find((entry) => entry.id === unlock.id);
+      return { label: skin ? skin.name : unlock.id, kind: "Sidearm skin" };
+    }
+    if (unlock.type === "crosshair") {
+      const crosshair = CROSSHAIR_COLORS.find((entry) => entry.id === unlock.id);
+      return { label: crosshair ? crosshair.name : unlock.id, kind: "Crosshair color" };
+    }
+    const title = TITLES.find((entry) => entry.id === unlock.id);
+    return { label: title ? title.name : unlock.id, kind: "Title" };
+  });
+
+  unlockable.forEach((unlock) => {
+    const card = createEl("div", { className: "unlock-card" });
+    card.append(createEl("span", { text: unlock.kind }));
+    card.append(createEl("b", { text: unlock.label }));
+    root.append(card);
+  });
+
   $("rewardsUnlocksWrap").style.display = unlockable.length ? "block" : "none";
   if (unlockable.length) sfx.unlock();
+}
 
-  // Contract progress snapshot.
-  const contract = CONTRACTS.find((c) => c.id === state.contract) || CONTRACTS[0];
+function renderRewardContract() {
+  const contract = CONTRACTS.find((entry) => entry.id === state.contract) || CONTRACTS[0];
   const tier = contractTier(contract.id);
   const nextTierAt = contract.tiers[Math.min(tier, contract.tiers.length - 1)];
-  const prog = state.contracts[contract.id].progress;
-  $("rewardsContract").innerHTML = `
-    <span>${contract.name}</span>
-    <b>${Math.min(prog, nextTierAt)} / ${nextTierAt} ${contract.metricLabel}</b>
-    <em>Tier ${tier} / ${contract.tiers.length}</em>
-  `;
+  const progress = state.contracts[contract.id].progress;
+  const root = $("rewardsContract");
+  clearNode(root);
+  root.append(createEl("span", { text: contract.name }));
+  root.append(createEl("b", { text: `${Math.min(progress, nextTierAt)} / ${nextTierAt} ${contract.metricLabel}` }));
+  root.append(createEl("em", { text: `Tier ${tier} / ${contract.tiers.length}` }));
 }
 
 function wireResultsButtons() {
   $("resultsContinue").addEventListener("click", () => {
     sfx.uiClick();
-    showRewards(window._pendingRewards || { xp: 0, lines: [], newUnlocks: [], leveledUp: false });
+    showRewards(window._pendingRewards || {
+      xp: 0,
+      lines: [],
+      newUnlocks: [],
+      leveledUp: false,
+    });
   });
+
   $("rewardsAgain").addEventListener("click", () => {
     sfx.uiConfirm();
-    $("matchRewards").classList.remove("is-active");
-    launchMatch();
+    setModalVisible("matchRewards", false);
+    handlePrimaryPlay();
   });
+
   $("rewardsLoadout").addEventListener("click", () => {
     sfx.uiClick();
-    $("matchRewards").classList.remove("is-active");
+    setModalVisible("matchRewards", false);
     showPage("loadout");
   });
+
   $("rewardsClose").addEventListener("click", () => {
     sfx.uiClick();
-    $("matchRewards").classList.remove("is-active");
-    showPage("home");
+    setModalVisible("matchRewards", false);
+    showPage("play");
   });
 }
 
 /* ------------------------------------------------------------- refresh --- */
 
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-}
-
 function agentById(id) {
-  return AGENTS.find((a) => a.id === id) || AGENTS[0];
+  return AGENTS.find((agent) => agent.id === id) || AGENTS[0];
 }
 
 function refreshAll() {
@@ -490,112 +1231,131 @@ function refreshAll() {
 }
 
 function refreshIdentity() {
-  const callsign = state.callsign || "Aegis";
+  const callsign = currentCallsign();
   const agent = agentById(state.agent);
-  const info = levelInfo();
-  $("profileInitial").textContent = callsign[0].toUpperCase();
-  $("profileName").textContent = callsign;
-  $("profileRank").textContent = `${rankName()} · Lv ${info.level}`;
-  $("briefingMotto").textContent = state.motto;
-  $("briefCallsign").textContent = `${callsign} online`;
-  $("briefAgent").textContent = `Agent: ${agent.name}`;
-  $("briefMap").textContent = `Map: ${MAP_INFO.name}`;
-  $("briefTone").textContent = `Tone: ${state.tone}`;
-  $("homeMode").textContent = MODES[selectedMode].name;
-  $("homePrimary").textContent = WEAPONS[state.primary].name;
-  const contract = CONTRACTS.find((c) => c.id === state.contract) || CONTRACTS[0];
-  $("homeContract").textContent = contract.name;
-}
-
-function refreshPlay() {
-  document.querySelectorAll(".mode-card").forEach((c) => c.classList.toggle("is-selected", c.dataset.mode === selectedMode));
-  const mode = MODES[selectedMode];
-  $("selectedModeTitle").textContent = mode.name;
-  $("selectedModeBody").textContent = mode.body;
-  $("selectedModePlayers").textContent = mode.players;
-  $("selectedModeMap").textContent = MAP_INFO.name;
-  $("selectedModeAgent").textContent = agentById(state.agent).name;
-  $("roundLengthLabel").textContent = mode.id === "botstrike" ? "90s rounds · first to 4" : "No timer";
-  $("selectedModeDifficulty").textContent = `Bots: ${BOT_TUNING[state.settings.botDifficulty].label}`;
-}
-
-function refreshSquad() {
-  const agent = agentById(state.agent);
-  document.querySelectorAll(".agent-card").forEach((c) => c.classList.toggle("is-selected", c.dataset.agent === state.agent));
+  $("callsignInput").value = callsign;
+  $("profileTitle").textContent = callsign;
+  $("profileBio").textContent = agent.profile;
+  $("profileAvatar").textContent = callsign[0].toUpperCase();
+  $("profileTitleTag").textContent = titleName();
   $("selectedAgentName").textContent = agent.name;
   $("selectedAgentBio").textContent = agent.bio;
   $("selectedAgentAbility").innerHTML = `<b>${agent.ability.name}</b> <span>[Q]</span> — ${agent.ability.blurb}`;
-  $("callsignInput").value = state.callsign;
+  $("lobbyRankChip").textContent = `${rankName()} · Lv ${levelInfo().level}`;
+  const contract = CONTRACTS.find((entry) => entry.id === state.contract) || CONTRACTS[0];
+  $("lobbyContractChip").textContent = contract.name;
+  $("squadCallsignLabel").textContent = callsign;
   $("squadMotto").value = state.motto;
   $("seasonTone").value = state.tone;
 }
 
+function refreshPlay() {
+  const mode = selectedLobbyMode();
+  document.querySelectorAll(".mode-chip").forEach((chip) => {
+    chip.classList.toggle("is-selected", chip.dataset.mode === selectedMode);
+  });
+  document.querySelectorAll("[data-region-option]").forEach((chip) => {
+    chip.classList.toggle("is-selected", chip.dataset.regionOption === selectedRegion);
+  });
+  $("privateRoomRow").hidden = selectedMode !== "private_room";
+  $("startMatch").textContent = mode.playLabel;
+  $("selectedModeMap").textContent = MAP_INFO.name;
+  $("selectedModeDifficulty").textContent = `Bots: ${BOT_TUNING[state.settings.botDifficulty].label}`;
+  $("privateRoomCode").value = onlineState.roomCode || $("privateRoomCode").value;
+  if (onlineState.roomState?.phase === "lobby") {
+    setLobbyStatus(onlineState.roomCode ? `Room ${onlineState.roomCode} ready. Waiting for opponent...` : "Waiting for room to fill...");
+  } else if (onlineState.queueMode) {
+    setLobbyStatus(onlineState.queueMode === "squad" ? "Finding a 2v2 lobby..." : "Finding a duel...");
+  } else {
+    setLobbyStatus(mode.status);
+  }
+}
+
+function refreshSquad() {
+  document.querySelectorAll(".agent-card").forEach((card) => {
+    card.classList.toggle("is-selected", card.dataset.agent === state.agent);
+  });
+}
+
 function refreshLoadout() {
   const weapon = WEAPONS[state.primary];
-  document.querySelectorAll(".weapon-card").forEach((c) => c.classList.toggle("is-selected", c.dataset.weapon === state.primary));
+  document.querySelectorAll(".weapon-card").forEach((card) => {
+    card.classList.toggle("is-selected", card.dataset.weapon === state.primary);
+  });
   $("selectedPrimaryName").textContent = weapon.name;
   $("selectedPrimaryBody").textContent = weapon.blurb;
+  $("lobbyWeaponName").textContent = weapon.name;
+  $("lobbyWeaponBody").textContent = weapon.blurb;
   $("loadoutStats").innerHTML = `
     <span>Damage ${weapon.damage}</span>
     <span>Mag ${weapon.mag}</span>
     <span>${weapon.auto ? "Full auto" : "Semi auto"}</span>
     <span>${Math.round(60000 / weapon.cooldownMs)} rpm</span>
   `;
-  const skin = SKINS.find((s) => s.id === state.skin) || SKINS[0];
+  const skin = SKINS.find((entry) => entry.id === state.skin) || SKINS[0];
   $("loadoutSkinLabel").textContent = `Sidearm: Backstop · ${skin.name}`;
 }
 
 function refreshContracts() {
-  const contract = CONTRACTS.find((c) => c.id === state.contract) || CONTRACTS[0];
-  const prog = state.contracts[contract.id];
+  const contract = CONTRACTS.find((entry) => entry.id === state.contract) || CONTRACTS[0];
+  const progress = state.contracts[contract.id];
   const tier = contractTier(contract.id);
-  document.querySelectorAll(".contract-card").forEach((c) => c.classList.toggle("is-selected", c.dataset.contract === state.contract));
+  document.querySelectorAll(".contract-card").forEach((card) => {
+    card.classList.toggle("is-selected", card.dataset.contract === state.contract);
+  });
   $("activeContractTitle").textContent = contract.name;
   $("activeContractBody").textContent = contract.body;
   const ladder = $("contractLadder");
-  ladder.innerHTML = contract.tiers.map((threshold, i) => `
-    <span class="${i < tier ? "is-filled" : ""}">
+  ladder.innerHTML = contract.tiers.map((threshold, index) => `
+    <span class="${index < tier ? "is-filled" : ""}">
       <b>${threshold}</b>
-      <em>${i < tier ? "done" : contract.metricLabel}</em>
+      <em>${index < tier ? "done" : contract.metricLabel}</em>
     </span>
   `).join("");
-  $("contractProgressLabel").textContent = `${prog.progress} ${contract.metricLabel} total · tier ${tier} of ${contract.tiers.length}`;
+  $("contractProgressLabel").textContent = `${progress.progress} ${contract.metricLabel} total · tier ${tier} of ${contract.tiers.length}`;
   document.querySelectorAll(".contract-card").forEach((card) => {
-    const c = CONTRACTS.find((x) => x.id === card.dataset.contract);
-    const t = contractTier(c.id);
-    card.querySelector("em").textContent = `Tier ${t}/${c.tiers.length} · ${state.contracts[c.id].progress} ${c.metricLabel}`;
+    const current = CONTRACTS.find((entry) => entry.id === card.dataset.contract);
+    const currentTier = contractTier(current.id);
+    card.querySelector("em").textContent = `Tier ${currentTier}/${current.tiers.length} · ${state.contracts[current.id].progress} ${current.metricLabel}`;
   });
 }
 
 function refreshProfile() {
   const info = levelInfo();
-  const s = state.stats;
-  $("profileTitle").textContent = state.callsign;
-  $("profileBio").textContent = agentById(state.agent).profile;
-  $("profileTitleTag").textContent = titleName();
-  $("profileAvatar").textContent = (state.callsign || "A")[0].toUpperCase();
+  const stats = state.stats;
   $("statRank").textContent = rankName();
   $("statLevel").textContent = `Lv ${info.level}`;
-  $("statMatches").textContent = String(s.matches);
-  $("statWinsBig").textContent = String(s.matchWins);
-  $("statKills").textContent = String(s.kills);
-  $("statKd").textContent = s.deaths ? (s.kills / s.deaths).toFixed(2) : String(s.kills);
-  $("statHeadshots").textContent = String(s.headshots);
-  $("statDamageBig").textContent = String(Math.round(s.damage));
+  $("statMatches").textContent = String(stats.matches);
+  $("statWinsBig").textContent = String(stats.matchWins);
+  $("statKills").textContent = String(stats.kills);
+  $("statKd").textContent = stats.deaths ? (stats.kills / stats.deaths).toFixed(2) : String(stats.kills);
+  $("statHeadshots").textContent = String(stats.headshots);
+  $("statDamageBig").textContent = String(Math.round(stats.damage));
   $("profileXpBar").style.width = `${Math.round((info.into / info.next) * 100)}%`;
   $("profileXpLabel").textContent = `${info.into} / ${info.next} XP to level ${info.level + 1}`;
 
   const list = $("historyList");
+  clearNode(list);
   if (!state.matchHistory.length) {
-    list.innerHTML = "<li><span>No matches yet — deploy through Play.</span><strong>—</strong></li>";
-  } else {
-    list.innerHTML = state.matchHistory.map((m) => `
-      <li>
-        <span>${m.mode} · ${m.score} · ${m.detail}</span>
-        <strong class="${m.result === "Victory" ? "is-win" : ""}">${m.result}</strong>
-      </li>
-    `).join("");
+    const row = createEl("li");
+    row.append(createEl("span", { text: "No matches yet — deploy through Play." }));
+    row.append(createEl("strong", { text: "—" }));
+    list.append(row);
+    return;
   }
+
+  state.matchHistory.forEach((entry) => {
+    const row = createEl("li");
+    const label = createEl("span", {
+      text: `${entry.mode}${entry.online ? " · Online" : ""} · ${entry.score} · ${entry.detail}`,
+    });
+    const result = createEl("strong", {
+      className: entry.result === "Victory" ? "is-win" : "",
+      text: entry.result,
+    });
+    row.append(label, result);
+    list.append(row);
+  });
 }
 
 function refreshCollection() {
@@ -612,25 +1372,25 @@ function refreshCollection() {
       </button>
     `;
   }).join("");
-  const equippedSkin = SKINS.find((s) => s.id === state.skin) || SKINS[0];
-  $("equippedSkinLabel").textContent = `Equipped: ${equippedSkin.name}`;
+  const equipped = SKINS.find((skin) => skin.id === state.skin) || SKINS[0];
+  $("equippedSkinLabel").textContent = `Equipped: ${equipped.name}`;
 
-  $("crosshairGrid").innerHTML = CROSSHAIR_COLORS.map((c) => {
-    const unlocked = isUnlocked("crosshair", c.id);
+  $("crosshairGrid").innerHTML = CROSSHAIR_COLORS.map((crosshair) => {
+    const unlocked = isUnlocked("crosshair", crosshair.id);
     return `
-      <button class="chip ${state.crosshairColor === c.id ? "is-equipped" : ""} ${unlocked ? "" : "is-locked"}"
-        data-crosshair="${c.id}" type="button" title="${unlocked ? c.name : `Locked — ${unlockRuleLabel("crosshair", c.id)}`}">
-        <i style="background:${c.value}"></i>${c.name}
+      <button class="chip ${state.crosshairColor === crosshair.id ? "is-equipped" : ""} ${unlocked ? "" : "is-locked"}"
+        data-crosshair="${crosshair.id}" type="button" title="${unlocked ? crosshair.name : `Locked — ${unlockRuleLabel("crosshair", crosshair.id)}`}">
+        <i style="background:${crosshair.value}"></i>${crosshair.name}
       </button>
     `;
   }).join("");
 
-  $("titleGrid").innerHTML = TITLES.map((t) => {
-    const unlocked = isUnlocked("title", t.id);
+  $("titleGrid").innerHTML = TITLES.map((title) => {
+    const unlocked = isUnlocked("title", title.id);
     return `
-      <button class="chip ${state.title === t.id ? "is-equipped" : ""} ${unlocked ? "" : "is-locked"}"
-        data-title="${t.id}" type="button" title="${unlocked ? t.name : `Locked — ${unlockRuleLabel("title", t.id)}`}">
-        ${t.name}${unlocked ? "" : " 🔒"}
+      <button class="chip ${state.title === title.id ? "is-equipped" : ""} ${unlocked ? "" : "is-locked"}"
+        data-title="${title.id}" type="button" title="${unlocked ? title.name : `Locked — ${unlockRuleLabel("title", title.id)}`}">
+        ${title.name}${unlocked ? "" : " LOCKED"}
       </button>
     `;
   }).join("");
@@ -645,4 +1405,9 @@ function refreshSettings() {
   $("settingCrosshairLabel").textContent = `${state.settings.crosshairSize.toFixed(2)}x`;
   $("visualQuality").value = state.settings.quality;
   $("botDifficulty").value = state.settings.botDifficulty;
+
+  $("quickSettingVolume").value = String(Math.round(state.settings.volume * 100));
+  $("quickSettingMute").checked = state.settings.muted;
+  $("quickSettingSens").value = String(state.settings.sensitivity);
+  $("quickSettingSensLabel").textContent = `${state.settings.sensitivity.toFixed(2)}x`;
 }

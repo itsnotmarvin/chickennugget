@@ -1,4 +1,13 @@
 .playwright-cli/
+.playwright-mcp/
+.wrangler-home/
 .claude/*
 !.claude/commands/
 !.claude/commands/**
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+*.log
+output/
