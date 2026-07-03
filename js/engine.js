@@ -11,6 +11,12 @@ import {
 import { state } from "./state.js";
 import { sfx, startAmbient, stopAmbient, applyVolume } from "./audio.js";
 import { isBackstab, KNIFE_STATS, withinFacingCone } from "../shared/combat.js";
+import {
+  BODY_RADIUS,
+  PLAYABLE_BOUNDS,
+  STEP_HEIGHT,
+  resolveHorizontalMove,
+} from "../shared/collision.js";
 import { MODE_DEFS } from "../shared/protocol.js";
 
 /* ------------------------------------------------------------------ DOM -- */
@@ -110,9 +116,6 @@ let clockMs = 0;
 const nowMs = () => clockMs;
 
 /* -------------------------------------------------- collision & LOS ------ */
-
-const BODY_RADIUS = 0.36;
-const STEP_HEIGHT = 0.55;
 
 function collides(x, z, feetY) {
   const minC = Math.floor((x - BODY_RADIUS) / CELL_SIZE + GRID_W / 2);
@@ -272,7 +275,7 @@ function initRenderer() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   window.addEventListener("resize", onResize);
 }
 
@@ -283,6 +286,9 @@ function applyQuality() {
   if (scene) {
     scene.traverse((o) => {
       if (o.userData.qualityShadow) {
+        o.castShadow = high;
+      }
+      if (o.userData.qualityShadowLight) {
         o.castShadow = high;
       }
     });
@@ -354,8 +360,9 @@ function buildMap() {
   scene.add(sky);
 
   // Lights.
-  scene.add(new THREE.HemisphereLight(0xc4d6ea, 0x54452f, 1.7));
-  const sun = new THREE.DirectionalLight(0xffd9a0, 2.6);
+  scene.add(new THREE.HemisphereLight(0xc4d6ea, 0x54452f, 1.05));
+  scene.add(new THREE.AmbientLight(0x46505e, 0.55));
+  const sun = new THREE.DirectionalLight(0xffd9a0, 1.55);
   sun.position.set(-22, 34, 14);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
@@ -364,14 +371,14 @@ function buildMap() {
   sun.shadow.camera.far = 90;
   sun.shadow.bias = -0.002;
   scene.add(sun);
-  const fillA = new THREE.PointLight(0x3bd0c2, 60, 34);
-  fillA.position.set(-WORLD_W / 2 + 6, 5, 0);
+  const fillA = new THREE.PointLight(0x3bd0c2, 42, 30);
+  fillA.position.set(-WORLD_W / 2 + 6, 3.2, 0);
   scene.add(fillA);
-  const fillB = new THREE.PointLight(0xf05f51, 60, 34);
-  fillB.position.set(WORLD_W / 2 - 6, 5, 0);
+  const fillB = new THREE.PointLight(0xf05f51, 42, 30);
+  fillB.position.set(WORLD_W / 2 - 6, 3.2, 0);
   scene.add(fillB);
-  const fillMid = new THREE.PointLight(0xf1c36e, 70, 30);
-  fillMid.position.set(0, 6.5, 0);
+  const fillMid = new THREE.PointLight(0xf1c36e, 48, 24);
+  fillMid.position.set(0, 4.7, 0);
   scene.add(fillMid);
 
   // Floor.
@@ -458,6 +465,71 @@ function buildMap() {
   const stackMat = track(new THREE.MeshStandardMaterial({ color: 0x536070, roughness: 0.7, metalness: 0.25 }));
   const pillarMat = track(new THREE.MeshStandardMaterial({ color: 0x5a636c, roughness: 0.6, metalness: 0.35 }));
   const drumMat = track(new THREE.MeshStandardMaterial({ color: 0x8a4a2a, roughness: 0.55, metalness: 0.3 }));
+  const roofMat = track(new THREE.MeshStandardMaterial({ color: 0x333b46, roughness: 0.78, metalness: 0.28, emissive: 0x232b36, emissiveIntensity: 0.85 }));
+  const beamMat = track(new THREE.MeshStandardMaterial({ color: 0x161a1f, roughness: 0.65, metalness: 0.48 }));
+  const skylightMat = track(new THREE.MeshStandardMaterial({
+    color: 0x9fb3c5,
+    emissive: 0x1d2d3c,
+    emissiveIntensity: 0.35,
+    roughness: 0.18,
+    metalness: 0.05,
+    transparent: true,
+    opacity: 0.34,
+  }));
+
+  const addBox = (geo, mat, x, y, z, shadow = true) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = shadow;
+    mesh.receiveShadow = true;
+    mesh.userData.qualityShadow = shadow;
+    scene.add(mesh);
+    return mesh;
+  };
+
+  // Roof and upper enclosure. The central skylight keeps the foundry readable
+  // while the segmented panels make the ceiling feel built, not capped.
+  const roofY = 6.18;
+  const upperBandY = 5.1;
+  addBox(track(new THREE.BoxGeometry(WORLD_W - CELL_SIZE * 2, 2.1, 0.22)), wallMat, 0, upperBandY, -WORLD_H / 2 + CELL_SIZE + 0.02);
+  addBox(track(new THREE.BoxGeometry(WORLD_W - CELL_SIZE * 2, 2.1, 0.22)), wallMat, 0, upperBandY, WORLD_H / 2 - CELL_SIZE - 0.02);
+  addBox(track(new THREE.BoxGeometry(0.22, 2.1, WORLD_H - CELL_SIZE * 2)), wallMat, -WORLD_W / 2 + CELL_SIZE + 0.02, upperBandY, 0);
+  addBox(track(new THREE.BoxGeometry(0.22, 2.1, WORLD_H - CELL_SIZE * 2)), wallMat, WORLD_W / 2 - CELL_SIZE - 0.02, upperBandY, 0);
+
+  const roofPanelGeo = {
+    side: track(new THREE.BoxGeometry(18, 0.18, WORLD_H - 5.2)),
+    cap: track(new THREE.BoxGeometry(14, 0.18, 6.4)),
+  };
+  addBox(roofPanelGeo.side, roofMat, -15.5, roofY, 0);
+  addBox(roofPanelGeo.side, roofMat, 15.5, roofY, 0);
+  addBox(roofPanelGeo.cap, roofMat, 0, roofY, -16.2);
+  addBox(roofPanelGeo.cap, roofMat, 0, roofY, 16.2);
+
+  const skylight = new THREE.Mesh(
+    track(new THREE.PlaneGeometry(12.6, 21.6)),
+    skylightMat,
+  );
+  skylight.rotation.x = -Math.PI / 2;
+  skylight.position.set(0, roofY + 0.035, 0);
+  skylight.receiveShadow = true;
+  scene.add(skylight);
+
+  const crossBeamGeo = track(new THREE.BoxGeometry(WORLD_W - CELL_SIZE * 2.5, 0.32, 0.26));
+  [-16, -8, 0, 8, 16].forEach((z) => {
+    addBox(crossBeamGeo, beamMat, 0, roofY - 0.32, z);
+  });
+  const longBeamGeo = track(new THREE.BoxGeometry(0.28, 0.34, WORLD_H - CELL_SIZE * 2.5));
+  [-6.7, 6.7].forEach((x) => {
+    addBox(longBeamGeo, beamMat, x, roofY - 0.34, 0);
+  });
+  const skylightRailGeo = track(new THREE.BoxGeometry(0.16, 0.12, 21.8));
+  [-6.2, 6.2].forEach((x) => {
+    addBox(skylightRailGeo, beamMat, x, roofY + 0.08, 0, false);
+  });
+  const skylightRungGeo = track(new THREE.BoxGeometry(12.5, 0.12, 0.14));
+  [-10.5, -5.25, 0, 5.25, 10.5].forEach((z) => {
+    addBox(skylightRungGeo, beamMat, 0, roofY + 0.09, z, false);
+  });
 
   const cellsByType = { "#": [], B: [], c: [], o: [], P: [] };
   for (let r = 0; r < GRID_H; r += 1) {
@@ -519,14 +591,31 @@ function buildMap() {
   // Hanging light fixtures down the mid line.
   const fixtureGeo = track(new THREE.BoxGeometry(1.6, 0.18, 0.5));
   const fixtureMat = track(new THREE.MeshStandardMaterial({ color: 0x20242a, emissive: 0xffe6b8, emissiveIntensity: 1.6 }));
+  const rodGeo = track(new THREE.CylinderGeometry(0.035, 0.035, 1.38, 5));
   for (const z of [-12, 0, 12]) {
     const f = new THREE.Mesh(fixtureGeo, fixtureMat);
     f.position.set(0, 4.6, z);
+    f.castShadow = true;
+    f.receiveShadow = true;
+    f.userData.qualityShadow = true;
     scene.add(f);
-    const rodGeo = track(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 4));
     const rod = new THREE.Mesh(rodGeo, pillarMat);
-    rod.position.set(0, 5.9, z);
+    rod.position.set(0, 5.36, z);
+    rod.castShadow = true;
+    rod.receiveShadow = true;
+    rod.userData.qualityShadow = true;
     scene.add(rod);
+    const target = new THREE.Object3D();
+    target.position.set(0, 0.1, z);
+    scene.add(target);
+    const light = new THREE.SpotLight(0xffddb0, 36, 18, Math.PI / 3.4, 0.58, 1.25);
+    light.position.set(0, 4.52, z);
+    light.target = target;
+    light.castShadow = state.settings.quality !== "fast";
+    light.userData.qualityShadowLight = true;
+    light.shadow.mapSize.set(512, 512);
+    light.shadow.bias = -0.0015;
+    scene.add(light);
   }
 
   // Aegis barrier visual (hidden until deployed).
@@ -2551,23 +2640,32 @@ function updatePlayer(dt) {
 }
 
 function moveWithCollision(entity, dx, dz) {
-  const feet = entity.y;
-  if (!collides(entity.x + dx, entity.z, feet)) entity.x += dx;
-  else if (!collides(entity.x + dx, entity.z, feet + STEP_HEIGHT)) entity.x += dx; // step assist
-  if (!collides(entity.x, entity.z + dz, feet)) entity.z += dz;
-  else if (!collides(entity.x, entity.z + dz, feet + STEP_HEIGHT)) entity.z += dz;
+  const resolved = resolveHorizontalMove(entity, dx, dz, {
+    collidesFn: collides,
+    clampBoundsFn: (x, z) => ({
+      x: clamp(x, PLAYABLE_BOUNDS.minX, PLAYABLE_BOUNDS.maxX),
+      z: clamp(z, PLAYABLE_BOUNDS.minZ, PLAYABLE_BOUNDS.maxZ),
+    }),
+  });
+  entity.x = resolved.x;
+  entity.z = resolved.z;
   // Also keep units apart (soft push).
   for (const other of combatants) {
     if (other === entity || !other.alive) continue;
     const d = Math.hypot(entity.x - other.x, entity.z - other.z);
     if (d < 0.7 && d > 0.001) {
       const push = (0.7 - d) * 0.5;
-      entity.x += ((entity.x - other.x) / d) * push;
-      entity.z += ((entity.z - other.z) / d) * push;
+      const pushed = resolveHorizontalMove(entity, ((entity.x - other.x) / d) * push, ((entity.z - other.z) / d) * push, {
+        collidesFn: collides,
+        clampBoundsFn: (x, z) => ({
+          x: clamp(x, PLAYABLE_BOUNDS.minX, PLAYABLE_BOUNDS.maxX),
+          z: clamp(z, PLAYABLE_BOUNDS.minZ, PLAYABLE_BOUNDS.maxZ),
+        }),
+      });
+      entity.x = pushed.x;
+      entity.z = pushed.z;
     }
   }
-  entity.x = clamp(entity.x, -WORLD_W / 2 + CELL_SIZE + 0.4, WORLD_W / 2 - CELL_SIZE - 0.4);
-  entity.z = clamp(entity.z, -WORLD_H / 2 + CELL_SIZE + 0.4, WORLD_H / 2 - CELL_SIZE - 0.4);
 }
 
 let vmT = 0;

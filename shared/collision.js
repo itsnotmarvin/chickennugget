@@ -9,8 +9,9 @@ import {
   WORLD_W,
 } from "./map-data.js";
 
-export const BODY_RADIUS = 0.36;
+export const BODY_RADIUS = 0.44;
 export const STEP_HEIGHT = 0.55;
+export const MOVE_SWEEP_STEP = 0.12;
 export const PLAYABLE_MARGIN = CELL_SIZE + 0.4;
 export const PLAYABLE_BOUNDS = Object.freeze({
   minX: -WORLD_W / 2 + PLAYABLE_MARGIN,
@@ -99,6 +100,49 @@ export function clampToPlayableBounds(x, z) {
     x: Math.max(PLAYABLE_BOUNDS.minX, Math.min(PLAYABLE_BOUNDS.maxX, x)),
     z: Math.max(PLAYABLE_BOUNDS.minZ, Math.min(PLAYABLE_BOUNDS.maxZ, z)),
   };
+}
+
+export function resolveHorizontalMove(
+  position,
+  dx,
+  dz,
+  {
+    collidesFn = collides,
+    clampBoundsFn = clampToPlayableBounds,
+    sweepStep = MOVE_SWEEP_STEP,
+  } = {},
+) {
+  let x = position.x;
+  let z = position.z;
+  const feetY = Math.max(0, position.y ?? 0);
+  const dist = Math.hypot(dx, dz);
+  const steps = Math.max(1, Math.ceil(dist / sweepStep));
+  let blockedX = false;
+  let blockedZ = false;
+
+  for (let index = 0; index < steps; index += 1) {
+    const stepX = dx / steps;
+    const stepZ = dz / steps;
+    const nextX = x + stepX;
+    if (!collidesFn(nextX, z, feetY)) {
+      x = nextX;
+    } else {
+      blockedX = true;
+    }
+
+    const nextZ = z + stepZ;
+    if (!collidesFn(x, nextZ, feetY)) {
+      z = nextZ;
+    } else {
+      blockedZ = true;
+    }
+
+    const bounded = clampBoundsFn(x, z);
+    x = bounded.x;
+    z = bounded.z;
+  }
+
+  return { x, z, blockedX, blockedZ };
 }
 
 export function positionInMapAabb(x, y, z) {
