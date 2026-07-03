@@ -38,6 +38,7 @@ const hud = {
   bannerSub: document.getElementById("bannerSub"),
   hitmarker: document.getElementById("hitmarker"),
   crosshair: document.getElementById("crosshair"),
+  scope: document.getElementById("scopeOverlay"),
   flashOverlay: document.getElementById("flashOverlay"),
   vignette: document.getElementById("damageVignette"),
   damageDir: document.getElementById("damageDir"),
@@ -563,38 +564,115 @@ function buildRadarBase() {
 
 /* -------------------------------------------------------- character rigs - */
 
-function buildCharacterRig(teamColor) {
+function buildCharacterRig(teamColor, agentId = "") {
   const group = new THREE.Group();
-  const bodyMat = track(new THREE.MeshStandardMaterial({ color: 0x23282e, roughness: 0.8 }));
-  const teamMat = track(new THREE.MeshStandardMaterial({ color: teamColor, emissive: teamColor, emissiveIntensity: 0.35, roughness: 0.6 }));
-  const skinMat = track(new THREE.MeshStandardMaterial({ color: 0xc9a985, roughness: 0.9 }));
+  const speedster = agentId === "vanta";
+  const bodyMat = track(new THREE.MeshStandardMaterial({
+    color: speedster ? 0x31151a : 0x23282e,
+    roughness: speedster ? 0.52 : 0.8,
+    metalness: speedster ? 0.16 : 0,
+  }));
+  const darkMat = speedster
+    ? track(new THREE.MeshStandardMaterial({ color: 0x16191e, roughness: 0.64, metalness: 0.18 }))
+    : bodyMat;
+  const teamMat = track(new THREE.MeshStandardMaterial({
+    color: speedster ? 0xf04438 : teamColor,
+    emissive: speedster ? 0xd8192f : teamColor,
+    emissiveIntensity: speedster ? 0.65 : 0.35,
+    roughness: 0.5,
+  }));
+  const lightningMat = track(new THREE.MeshBasicMaterial({
+    color: speedster ? 0xffdf5c : teamColor,
+    transparent: true,
+    opacity: speedster ? 0.95 : 0.72,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  const skinMat = track(new THREE.MeshStandardMaterial({ color: speedster ? 0xd2a86f : 0xc9a985, roughness: 0.9 }));
 
-  const torso = new THREE.Mesh(track(new THREE.BoxGeometry(0.62, 0.74, 0.34)), bodyMat);
+  const torso = new THREE.Mesh(track(new THREE.BoxGeometry(0.58, 0.82, 0.34)), bodyMat);
   torso.position.y = 1.08;
-  const chest = new THREE.Mesh(track(new THREE.BoxGeometry(0.66, 0.3, 0.38)), teamMat);
-  chest.position.y = 1.26;
-  const hips = new THREE.Mesh(track(new THREE.BoxGeometry(0.56, 0.28, 0.32)), bodyMat);
+  const chest = new THREE.Mesh(track(new THREE.BoxGeometry(0.68, 0.28, 0.39)), teamMat);
+  chest.position.y = 1.3;
+  const chestBolt = new THREE.Group();
+  if (speedster) {
+    const boltA = new THREE.Mesh(track(new THREE.BoxGeometry(0.1, 0.34, 0.025)), lightningMat);
+    boltA.position.set(-0.08, 1.34, 0.213);
+    boltA.rotation.z = -0.58;
+    const boltB = new THREE.Mesh(track(new THREE.BoxGeometry(0.1, 0.34, 0.025)), lightningMat);
+    boltB.position.set(0.08, 1.15, 0.214);
+    boltB.rotation.z = 0.58;
+    chestBolt.add(boltA, boltB);
+  }
+  const hips = new THREE.Mesh(track(new THREE.BoxGeometry(0.54, 0.25, 0.32)), darkMat);
   hips.position.y = 0.66;
   const head = new THREE.Mesh(track(new THREE.BoxGeometry(0.34, 0.36, 0.34)), skinMat);
   head.position.y = 1.66;
-  const visor = new THREE.Mesh(track(new THREE.BoxGeometry(0.36, 0.12, 0.1)), teamMat);
-  visor.position.set(0, 1.7, 0.16);
+  const helmet = speedster
+    ? new THREE.Mesh(track(new THREE.BoxGeometry(0.4, 0.2, 0.38)), teamMat)
+    : null;
+  if (helmet) helmet.position.set(0, 1.77, 0);
+  const visor = new THREE.Mesh(track(new THREE.BoxGeometry(0.4, 0.1, 0.1)), speedster ? lightningMat : teamMat);
+  visor.position.set(0, 1.69, 0.17);
 
-  const legGeo = track(new THREE.BoxGeometry(0.2, 0.62, 0.24));
-  const legL = new THREE.Mesh(legGeo, bodyMat); legL.position.set(-0.16, 0.31, 0);
-  const legR = new THREE.Mesh(legGeo, bodyMat); legR.position.set(0.16, 0.31, 0);
-  const armGeo = track(new THREE.BoxGeometry(0.16, 0.56, 0.2));
-  const armL = new THREE.Mesh(armGeo, bodyMat); armL.position.set(-0.42, 1.12, 0.05);
-  const armR = new THREE.Mesh(armGeo, bodyMat); armR.position.set(0.42, 1.12, 0.05);
+  const legGeo = track(new THREE.BoxGeometry(0.18, 0.64, 0.23));
+  const legL = new THREE.Mesh(legGeo, speedster ? teamMat : bodyMat); legL.position.set(-0.16, 0.32, 0);
+  const legR = new THREE.Mesh(legGeo, speedster ? teamMat : bodyMat); legR.position.set(0.16, 0.32, 0);
+  const bootGeo = track(new THREE.BoxGeometry(0.21, 0.16, 0.32));
+  const bootL = new THREE.Mesh(bootGeo, darkMat); bootL.position.set(-0.16, 0.05, 0.06);
+  const bootR = new THREE.Mesh(bootGeo, darkMat); bootR.position.set(0.16, 0.05, 0.06);
+  const armGeo = track(new THREE.BoxGeometry(0.15, 0.58, 0.19));
+  const armL = new THREE.Mesh(armGeo, speedster ? teamMat : bodyMat); armL.position.set(-0.42, 1.13, 0.05);
+  const armR = new THREE.Mesh(armGeo, speedster ? teamMat : bodyMat); armR.position.set(0.42, 1.13, 0.05);
+
+  const speedParts = [];
+  if (speedster) {
+    const addStripe = (x, y, z, rot = 0) => {
+      const stripe = new THREE.Mesh(track(new THREE.BoxGeometry(0.055, 0.42, 0.025)), lightningMat);
+      stripe.position.set(x, y, z);
+      stripe.rotation.z = rot;
+      group.add(stripe);
+      speedParts.push(stripe);
+    };
+    addStripe(-0.43, 1.13, 0.18, -0.18);
+    addStripe(0.43, 1.13, 0.18, 0.18);
+    addStripe(-0.16, 0.32, 0.16, 0.22);
+    addStripe(0.16, 0.32, 0.16, -0.22);
+    [-0.34, 0, 0.34].forEach((x, i) => {
+      const flare = new THREE.Mesh(track(new THREE.BoxGeometry(0.04, 0.08, 0.9 - i * 0.12)), lightningMat);
+      flare.position.set(x, 1.08 - i * 0.16, -0.36);
+      flare.rotation.x = 0.22;
+      flare.visible = false;
+      group.add(flare);
+      speedParts.push(flare);
+    });
+  }
 
   const gun = new THREE.Mesh(track(new THREE.BoxGeometry(0.1, 0.14, 0.78)), track(new THREE.MeshStandardMaterial({ color: 0x14171a, roughness: 0.5, metalness: 0.4 })));
   gun.position.set(0.24, 1.22, 0.42);
 
-  group.add(torso, chest, hips, head, visor, legL, legR, armL, armR, gun);
+  group.add(torso, chest, chestBolt, hips, head, visor, legL, legR, bootL, bootR, armL, armR, gun);
+  if (helmet) group.add(helmet);
   group.traverse((o) => {
     if (o.isMesh) { o.castShadow = true; o.userData.qualityShadow = true; }
   });
-  return { group, legL, legR, armL, armR, head, flashMats: [teamMat, bodyMat] };
+  return {
+    group,
+    torso,
+    chest,
+    hips,
+    legL,
+    legR,
+    bootL,
+    bootR,
+    armL,
+    armR,
+    head,
+    gun,
+    speedParts,
+    isSpeedster: speedster,
+    flashMats: [teamMat, bodyMat],
+  };
 }
 
 /* ------------------------------------------------------------- viewmodel - */
@@ -651,6 +729,43 @@ function buildViewmodel() {
     g.add(body, barrel, scope, stock, mag);
     return { group: g, muzzle: new THREE.Vector3(0, 0.02, -0.76) };
   };
+  const makeSniper = () => {
+    const g = new THREE.Group();
+    const olive = track(new THREE.MeshStandardMaterial({ color: 0x8b9f51, roughness: 0.62, metalness: 0.14 }));
+    const oliveDark = track(new THREE.MeshStandardMaterial({ color: 0x4d5b32, roughness: 0.75, metalness: 0.08 }));
+    const black = track(new THREE.MeshStandardMaterial({ color: 0x111417, roughness: 0.44, metalness: 0.42 }));
+    const glass = track(new THREE.MeshStandardMaterial({ color: 0x131a28, emissive: 0x0b1530, emissiveIntensity: 0.55, roughness: 0.18, metalness: 0.1 }));
+
+    const chassis = new THREE.Mesh(track(new THREE.BoxGeometry(0.08, 0.12, 0.98)), olive);
+    chassis.position.set(0, 0, -0.08);
+    const fore = new THREE.Mesh(track(new THREE.BoxGeometry(0.07, 0.08, 0.58)), olive);
+    fore.position.set(0, 0.01, -0.65);
+    const barrel = new THREE.Mesh(track(new THREE.CylinderGeometry(0.017, 0.017, 0.74, 10)), black);
+    barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.025, -1.1);
+    const muzzle = new THREE.Mesh(track(new THREE.CylinderGeometry(0.024, 0.024, 0.12, 10)), black);
+    muzzle.rotation.x = Math.PI / 2; muzzle.position.set(0, 0.025, -1.5);
+    const grip = new THREE.Mesh(track(new THREE.BoxGeometry(0.055, 0.2, 0.08)), oliveDark);
+    grip.position.set(0, -0.14, 0.1); grip.rotation.x = 0.18;
+    const mag = new THREE.Mesh(track(new THREE.BoxGeometry(0.062, 0.16, 0.12)), black);
+    mag.position.set(0, -0.14, -0.16);
+    const stock = new THREE.Mesh(track(new THREE.BoxGeometry(0.07, 0.1, 0.36)), oliveDark);
+    stock.position.set(0, -0.015, 0.55);
+    const pad = new THREE.Mesh(track(new THREE.BoxGeometry(0.085, 0.13, 0.06)), black);
+    pad.position.set(0, -0.01, 0.76);
+    const scopeTube = new THREE.Mesh(track(new THREE.CylinderGeometry(0.045, 0.045, 0.5, 16)), black);
+    scopeTube.rotation.x = Math.PI / 2; scopeTube.position.set(0, 0.12, -0.2);
+    const scopeFront = new THREE.Mesh(track(new THREE.CylinderGeometry(0.07, 0.055, 0.12, 16)), olive);
+    scopeFront.rotation.x = Math.PI / 2; scopeFront.position.set(0, 0.12, -0.52);
+    const scopeRear = new THREE.Mesh(track(new THREE.CylinderGeometry(0.055, 0.065, 0.1, 16)), olive);
+    scopeRear.rotation.x = Math.PI / 2; scopeRear.position.set(0, 0.12, 0.1);
+    const lens = new THREE.Mesh(track(new THREE.CylinderGeometry(0.062, 0.062, 0.012, 16)), glass);
+    lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.12, -0.59);
+    const rail = new THREE.Mesh(track(new THREE.BoxGeometry(0.035, 0.025, 0.3)), black);
+    rail.position.set(0, 0.06, -0.18);
+
+    g.add(chassis, fore, barrel, muzzle, grip, mag, stock, pad, scopeTube, scopeFront, scopeRear, lens, rail);
+    return { group: g, muzzle: new THREE.Vector3(0, 0.025, -1.56) };
+  };
   const makePistol = (skin) => {
     const g = new THREE.Group();
     const mainMat = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(skin.main), roughness: 0.4, metalness: 0.3 }));
@@ -690,6 +805,7 @@ function buildViewmodel() {
   rigs.pike = makeRifle();
   rigs.wasp = makeSmg();
   rigs.longshot = makeDmr();
+  rigs.hawk = makeSniper();
   rigs.backstop = makePistol(skin);
   rigs.knife = makeKnife();
 
@@ -762,6 +878,20 @@ function spawnSparks(pos, color, count = 8) {
   }
 }
 
+function spawnSpeedStreak(entity, color = 0xffdc62) {
+  const vx = entity.velX || 0;
+  const vz = entity.velZ || 0;
+  const speed = Math.hypot(vx, vz);
+  if (speed < 2.4) return;
+  const dir = new THREE.Vector3(vx / speed, 0, vz / speed);
+  const side = new THREE.Vector3(-dir.z, 0, dir.x);
+  const base = new THREE.Vector3(entity.x, entity.y + rand(0.35, 1.45), entity.z)
+    .add(side.multiplyScalar(rand(-0.46, 0.46)));
+  const from = base.clone().sub(dir.clone().multiplyScalar(rand(0.2, 0.45)));
+  const to = base.clone().sub(dir.multiplyScalar(rand(1.35, 2.2)));
+  spawnTracer(from, to, color);
+}
+
 function updateFx(dt) {
   for (let i = tracers.length - 1; i >= 0; i -= 1) {
     const t = tracers[i];
@@ -795,6 +925,7 @@ function updateFx(dt) {
 const FREEZE_MS = 3000;
 const ROUND_END_MS = 3000;
 const MATCH_END_MS = 3200;
+const BASE_FOV = 78;
 const KNIFE_VIEWMODEL = {
   id: "knife",
   name: "Knife",
@@ -869,11 +1000,14 @@ function makePlayer() {
     meleeAnimUntil: 0,
     meleeAnimKind: "slash",
     inspectUntil: 0,
+    aiming: false,
+    aimT: 0,
+    nextSpeedFxAt: 0,
   };
 }
 
 function makeBot({ team, name, agent, tuning }) {
-  const rig = buildCharacterRig(TEAM_COLORS[team]);
+  const rig = buildCharacterRig(TEAM_COLORS[team], agent?.id);
   scene.add(rig.group);
   return {
     isPlayer: false,
@@ -900,7 +1034,8 @@ function makeBot({ team, name, agent, tuning }) {
 }
 
 function makeRemotePlayer(entry, seat = 0) {
-  const rig = buildCharacterRig(TEAM_COLORS[entry.team] || TEAM_COLORS.red);
+  const remoteAgent = AGENTS.find((a) => a.id === entry.agent) || AGENTS[seat % AGENTS.length];
+  const rig = buildCharacterRig(TEAM_COLORS[entry.team] || TEAM_COLORS.red, remoteAgent.id);
   scene.add(rig.group);
   rig.group.visible = false;
   return {
@@ -910,7 +1045,7 @@ function makeRemotePlayer(entry, seat = 0) {
     connected: entry.connected ?? true,
     team: entry.team,
     name: entry.name,
-    agent: AGENTS[seat % AGENTS.length],
+    agent: remoteAgent,
     rig,
     x: 0,
     z: 0,
@@ -934,6 +1069,10 @@ function makeRemotePlayer(entry, seat = 0) {
 
 function isOnlineMatch() {
   return !!match?.online;
+}
+
+function isPrimaryWeapon(id) {
+  return !!WEAPONS[id] && WEAPONS[id].slot === "primary";
 }
 
 function isBotRoundMode(modeId = match?.mode?.id) {
@@ -974,7 +1113,7 @@ export function startMatch({ modeId, onEnd }) {
   onEndCallback = onEnd;
 
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 220);
+  camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.05, 220);
   scene.add(camera);
 
   clockMs = 0;
@@ -1085,6 +1224,8 @@ function resetOnlineRoundState() {
   player.meleeUntil = 0;
   player.meleeAnimUntil = 0;
   player.inspectUntil = 0;
+  player.aiming = false;
+  player.aimT = 0;
 }
 
 function ensureOnlineCombatant(summary, seat = 0) {
@@ -1330,7 +1471,7 @@ export function startOnlineMatch({ net, roster, mode, localId, onEnd }) {
   onEndCallback = onEnd;
 
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 220);
+  camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.05, 220);
   scene.add(camera);
 
   clockMs = 0;
@@ -1343,10 +1484,14 @@ export function startOnlineMatch({ net, roster, mode, localId, onEnd }) {
   applyVolume();
 
   player = makePlayer();
+  const localEntry = roster.find((entry) => entry.id === localId);
+  const localPrimary = isPrimaryWeapon(localEntry?.weapon)
+    ? localEntry.weapon
+    : isPrimaryWeapon(state.primary) ? state.primary : "pike";
   player.id = localId;
   player.online = true;
   player.connected = true;
-  player.weapons.primary = weaponState("pike");
+  player.weapons.primary = weaponState(localPrimary);
   player.weapons.sidearm = weaponState("backstop");
   player.weapons.melee = weaponState("knife");
   player.slot = "primary";
@@ -1446,6 +1591,8 @@ function beginRound() {
       unit.meleeUntil = 0;
       unit.meleeAnimUntil = 0;
       unit.inspectUntil = 0;
+      unit.aiming = false;
+      unit.aimT = 0;
       placeAtSpawn(unit, blue[b], 0); b += 1;
     } else {
       unit.blindUntil = 0;
@@ -1571,6 +1718,9 @@ function teardown() {
   pauseOverlay.classList.remove("is-active");
   hud.flashOverlay.style.opacity = "0";
   hud.vignette.style.opacity = "0";
+  hud.crosshair.style.opacity = "1";
+  hud.root.classList.remove("is-speeding");
+  if (hud.scope) hud.scope.style.opacity = "0";
   document.body.classList.remove("is-match");
   currentMatch?.cleanupOnline?.();
   if (currentMatch?.online) currentMatch.net?.destroy?.();
@@ -1708,11 +1858,18 @@ function onMouseDown(e) {
     e.preventDefault();
     if (document.pointerLockElement !== canvas && !match.paused) requestLock();
     playerMelee("stab");
+    return;
+  }
+  if (e.button === 2 && activeWeapon()?.def?.aimFov) {
+    e.preventDefault();
+    player.aiming = true;
+    if (document.pointerLockElement !== canvas && !match.paused) requestLock();
   }
 }
 
 function onMouseUp(e) {
   if (e.button === 0) mouseDown = false;
+  if (e.button === 2 && player) player.aiming = false;
 }
 
 function onLockChange() {
@@ -1754,6 +1911,7 @@ function blockContextMenu(event) {
 export function openPause() {
   if (!match || match.paused) return;
   match.paused = true;
+  if (player) player.aiming = false;
   pointerLockWanted = false;
   if (document.pointerLockElement) document.exitPointerLock();
   pauseVolume.value = String(Math.round(state.settings.volume * 100));
@@ -1803,6 +1961,7 @@ function activeWeapon() {
 function switchSlot(slot) {
   if (player.slot === slot || !player.alive) return;
   player.slot = slot;
+  player.aiming = false;
   player.inspectUntil = 0;
   const w = activeWeapon();
   w.reloadingUntil = 0;
@@ -1840,6 +1999,28 @@ function finishReloadIfDue(w) {
   }
 }
 
+function updateAimState(w, frozen, dt) {
+  const canAim = !!w.def.aimFov && player.alive && !match.paused && !frozen;
+  const wantAim = canAim && player.aiming;
+  const inMs = Math.max(1, w.def.aimMs || 150);
+  const outMs = Math.max(1, w.def.aimOutMs || inMs);
+  const delta = (dt * 1000) / (wantAim ? inMs : outMs);
+  player.aimT = clamp((player.aimT || 0) + (wantAim ? delta : -delta), 0, 1);
+}
+
+function updateAimCamera(w) {
+  const aimT = player.aimT || 0;
+  const targetFov = w.def.aimFov ? lerp(BASE_FOV, w.def.aimFov, aimT) : BASE_FOV;
+  if (Math.abs(camera.fov - targetFov) > 0.02) {
+    camera.fov = targetFov;
+    camera.updateProjectionMatrix();
+  }
+  if (hud.scope) {
+    hud.scope.style.opacity = String(w.def.scopeOverlay ? aimT : 0);
+  }
+  hud.crosshair.style.opacity = String(w.def.scopeOverlay ? 1 - aimT : 1);
+}
+
 function playerShoot() {
   const w = activeWeapon();
   if (isOnlineMatch() && w.id === "knife") return;
@@ -1860,6 +2041,10 @@ function playerShoot() {
   const moving = keysDown.has("w") || keysDown.has("a") || keysDown.has("s") || keysDown.has("d");
   const airborne = player.y > 0.05 && groundAt(player.x, player.z, player.y) < player.y - 0.05;
   let spread = w.def.spread + (moving ? w.def.moveSpread * 0.6 : 0) + (airborne ? 0.03 : 0);
+  if (w.def.aimSpread !== undefined) {
+    const aimedSpread = w.def.aimSpread + (airborne ? 0.012 : 0) + (moving ? w.def.moveSpread * 0.08 : 0);
+    spread = lerp(spread, aimedSpread, player.aimT || 0);
+  }
   spread *= rand(0.6, 1.15);
 
   const eyeY = player.y + 1.62;
@@ -2236,6 +2421,10 @@ function useAbility() {
     }
   } else if (ability.id === "surge") {
     player.surgeUntil = nowMs() + ability.durationMs;
+    player.nextSpeedFxAt = 0;
+    for (let i = 0; i < 7; i += 1) {
+      spawnSparks(new THREE.Vector3(player.x + rand(-0.4, 0.4), player.y + rand(0.25, 1.45), player.z + rand(-0.4, 0.4)), 0xffdf5c, 1);
+    }
     for (const w of Object.values(player.weapons)) {
       const need = w.def.mag - w.mag;
       const take = Math.min(need, w.reserve);
@@ -2255,6 +2444,9 @@ function updatePlayer(dt) {
   if (!player.alive) {
     viewmodel.visible = false;
     hud.crosshair.style.display = "none";
+    hud.crosshair.style.opacity = "1";
+    hud.root.classList.remove("is-speeding");
+    if (hud.scope) hud.scope.style.opacity = "0";
     updateSpectateCamera(dt);
     return;
   }
@@ -2265,6 +2457,7 @@ function updatePlayer(dt) {
 
   const locked = document.pointerLockElement === canvas;
   const frozen = match.phase === "freeze" || match.phase === "roundEnd" || match.phase === "matchEnd";
+  updateAimState(w, frozen, dt);
 
   // Shield decay (Morrow ward).
   if (player.shield > 0 && player.shieldDecay) {
@@ -2284,6 +2477,7 @@ function updatePlayer(dt) {
   ix /= len; iz /= len;
   const sprinting = keysDown.has("shift") && iz < 0;
   let speed = 5.1 * (sprinting ? 1.42 : 1) * w.def.speedMult;
+  if (w.def.aimMoveMult) speed *= lerp(1, w.def.aimMoveMult, player.aimT || 0);
   if (nowMs() < player.surgeUntil) speed *= 1.4;
 
   const sin = Math.sin(player.yaw); const cos = Math.cos(player.yaw);
@@ -2313,6 +2507,14 @@ function updatePlayer(dt) {
 
   // Footsteps.
   const moveMag = Math.hypot(player.velX, player.velZ);
+  const speedsterFx = player.agent.id === "vanta" && (moveMag > 5.2 || nowMs() < player.surgeUntil);
+  hud.root.classList.toggle("is-speeding", speedsterFx);
+  if (speedsterFx && nowMs() > (player.nextSpeedFxAt || 0)) {
+    const surge = nowMs() < player.surgeUntil;
+    spawnSpeedStreak(player, surge ? 0xffdf5c : 0xf05f51);
+    if (surge) spawnSpeedStreak(player, 0xfff1a6);
+    player.nextSpeedFxAt = nowMs() + (surge ? 55 : 105);
+  }
   if (grounded && moveMag > 1.4) {
     player.stepAcc += dt * moveMag;
     if (player.stepAcc > 3.4) { player.stepAcc = 0; sfx.footstep(); }
@@ -2330,6 +2532,7 @@ function updatePlayer(dt) {
   // Camera.
   camera.position.set(player.x, player.y + 1.62, player.z);
   camera.rotation.set(player.pitch + (player.kickPitch || 0), player.yaw, 0, "YXZ");
+  updateAimCamera(w);
   updateViewmodel(dt, moveMag, grounded);
   decayKick(dt);
 
@@ -2372,13 +2575,15 @@ function updateViewmodel(dt, moveMag, grounded) {
   vmT += dt * (2 + moveMag * 1.1);
   const w = activeWeapon();
   const reloading = w.reloadingUntil > nowMs();
+  const aimT = player.aimT || 0;
   const bobX = Math.sin(vmT * 2.1) * 0.006 * (grounded ? moveMag * 0.25 : 0);
   const bobY = Math.abs(Math.cos(vmT * 2.1)) * -0.008 * (grounded ? moveMag * 0.25 : 0);
-  viewmodel.position.x = 0.28 + bobX;
-  viewmodel.position.y = -0.25 + bobY + (reloading ? -0.12 : 0) + (player.kickBack || 0) * 0.4;
-  viewmodel.position.z = -0.46 + (player.kickBack || 0);
+  viewmodel.position.x = lerp(0.28 + bobX, 0.02, aimT);
+  viewmodel.position.y = lerp(-0.25 + bobY + (reloading ? -0.12 : 0) + (player.kickBack || 0) * 0.4, -0.18, aimT);
+  viewmodel.position.z = lerp(-0.46 + (player.kickBack || 0), -0.34, aimT);
   viewmodel.rotation.x = reloading ? -0.5 : 0;
-  viewmodel.rotation.z = bobX * 2;
+  viewmodel.rotation.y = 0.06 * (1 - aimT);
+  viewmodel.rotation.z = bobX * 2 * (1 - aimT);
 
   const {
     rigs,
@@ -2491,6 +2696,11 @@ function botSetPathTo(bot, x, z) {
   bot.pathIdx = 1;
 }
 
+function botRoundPressure(bot) {
+  if (!match || !isBotRoundMode() || bot.team === player.team) return 1;
+  return 1 + Math.min(Math.max(match.round - 1, 0), 4) * 0.035;
+}
+
 function botFollowPath(bot, dt, speedScale = 1) {
   if (!bot.path || bot.pathIdx >= bot.path.length) return false;
   const node = bot.path[bot.pathIdx];
@@ -2500,7 +2710,7 @@ function botFollowPath(bot, dt, speedScale = 1) {
     bot.pathIdx += 1;
     return botFollowPath(bot, dt, speedScale);
   }
-  const speed = bot.tuning.speed * speedScale;
+  const speed = bot.tuning.speed * speedScale * botRoundPressure(bot);
   moveWithCollision(bot, (dx / dist) * speed * dt, (dz / dist) * speed * dt);
   const wantYaw = Math.atan2(-dx, -dz);
   bot.yaw += wrapAngle(wantYaw - bot.yaw) * clamp(dt * 8, 0, 1);
@@ -2570,6 +2780,47 @@ function botFireAt(bot, targetInfo, dt) {
   }
 }
 
+function poseCharacterRig(unit, dt) {
+  const rig = unit.rig;
+  if (!rig) return;
+  const moving = !!unit.moving;
+  const fast = rig.isSpeedster && moving;
+  unit.animT += dt * (moving ? fast ? 13 : 9 : 1.2);
+  const stride = Math.sin(unit.animT);
+  const lift = Math.cos(unit.animT * 2);
+  const swing = stride * (moving ? fast ? 0.78 : 0.55 : 0.04);
+  const lean = moving ? fast ? -0.22 : -0.08 : 0;
+  const bob = moving ? Math.max(0, lift) * (fast ? 0.05 : 0.025) : Math.sin(unit.animT) * 0.008;
+
+  rig.group.position.y = (unit.y || 0) + bob;
+  if (rig.torso) rig.torso.rotation.x = lean;
+  if (rig.chest) rig.chest.rotation.x = lean * 0.55;
+  if (rig.hips) rig.hips.rotation.x = -lean * 0.35;
+  rig.legL.rotation.x = swing;
+  rig.legR.rotation.x = -swing;
+  rig.armL.rotation.x = -swing * (fast ? 0.85 : 0.6);
+  rig.armR.rotation.x = swing * (fast ? 0.42 : 0.2);
+  if (rig.head) {
+    rig.head.rotation.x = -lean * 0.45;
+    rig.head.rotation.y = Math.sin(unit.animT * 0.5) * (moving ? 0.05 : 0.025);
+  }
+  if (rig.gun) {
+    rig.gun.rotation.x = moving ? -0.06 + Math.abs(stride) * 0.04 : 0;
+    rig.gun.rotation.y = moving ? stride * 0.025 : 0;
+  }
+  if (rig.speedParts?.length) {
+    const opacity = fast ? 0.7 + Math.max(0, stride) * 0.25 : 0.22;
+    rig.speedParts.forEach((part, i) => {
+      part.visible = fast || i < 4;
+      part.material.opacity = i < 4 ? 0.82 : opacity;
+      if (i >= 4) {
+        part.scale.z = fast ? 1 + Math.max(0, -stride) * 0.65 : 0.2;
+        part.position.z = fast ? -0.36 - Math.max(0, -stride) * 0.22 : -0.2;
+      }
+    });
+  }
+}
+
 function updateBot(bot, dt) {
   if (!bot.alive) {
     // Fall over and sink slightly.
@@ -2583,6 +2834,7 @@ function updateBot(bot, dt) {
   bot.moving = false;
   const frozen = match.phase !== "live";
   if (!frozen) {
+    const pressure = botRoundPressure(bot);
     const blinded = nowMs() < bot.blindUntil;
     const seen = blinded ? null : visibleEnemyFor(bot);
 
@@ -2598,14 +2850,14 @@ function updateBot(bot, dt) {
     if (bot.fleeFrom && nowMs() < bot.fleeUntil) {
       const dx = bot.x - bot.fleeFrom.x; const dz = bot.z - bot.fleeFrom.z;
       const d = Math.hypot(dx, dz) || 1;
-      moveWithCollision(bot, (dx / d) * bot.tuning.speed * 1.2 * dt, (dz / d) * bot.tuning.speed * 1.2 * dt);
+      moveWithCollision(bot, (dx / d) * bot.tuning.speed * 1.2 * pressure * dt, (dz / d) * bot.tuning.speed * 1.2 * pressure * dt);
       bot.moving = true;
     } else if (blinded) {
       // Stagger randomly while blind.
       if (Math.random() < dt * 3) bot.strafeDir *= -1;
       const sx = Math.sin(bot.yaw + Math.PI / 2) * bot.strafeDir;
       const sz = Math.cos(bot.yaw + Math.PI / 2) * bot.strafeDir;
-      moveWithCollision(bot, sx * 1.4 * dt, sz * 1.4 * dt);
+      moveWithCollision(bot, sx * 1.4 * pressure * dt, sz * 1.4 * pressure * dt);
       bot.moving = true;
     } else if (bot.state === "engage" && seen) {
       botFireAt(bot, seen, dt);
@@ -2620,8 +2872,8 @@ function updateBot(bot, dt) {
       const sz = Math.cos(bot.yaw + Math.PI / 2) * bot.strafeDir;
       moveWithCollision(
         bot,
-        (fx * toward * 0.8 + sx) * bot.tuning.speed * 0.62 * dt,
-        (fz * toward * 0.8 + sz) * bot.tuning.speed * 0.62 * dt,
+        (fx * toward * 0.8 + sx) * bot.tuning.speed * 0.62 * pressure * dt,
+        (fz * toward * 0.8 + sz) * bot.tuning.speed * 0.62 * pressure * dt,
       );
       bot.moving = true;
     } else if (bot.state === "cover") {
@@ -2687,14 +2939,9 @@ function updateBot(bot, dt) {
   }
 
   // Rig pose.
-  bot.rig.group.position.set(bot.x, bot.y + bot.rig.group.position.y * 0, bot.z);
-  if (bot.alive) bot.rig.group.position.y = 0;
+  bot.rig.group.position.set(bot.x, bot.y, bot.z);
   bot.rig.group.rotation.y = bot.yaw + Math.PI;
-  bot.animT += dt * (bot.moving ? 9 : 1.2);
-  const swing = Math.sin(bot.animT) * (bot.moving ? 0.55 : 0.04);
-  bot.rig.legL.rotation.x = swing;
-  bot.rig.legR.rotation.x = -swing;
-  bot.rig.armL.rotation.x = -swing * 0.6;
+  poseCharacterRig(bot, dt);
 
   // Footstep audio for nearby moving bots.
   if (bot.moving) {
@@ -2728,11 +2975,7 @@ function updateRemotePlayer(unit, dt) {
   unit.rig.group.position.x = unit.x;
   unit.rig.group.position.z = unit.z;
   unit.rig.group.rotation.y = unit.yaw + Math.PI;
-  unit.animT += dt * (unit.moving ? 9 : 1.2);
-  const swing = Math.sin(unit.animT) * (unit.moving ? 0.55 : 0.04);
-  unit.rig.legL.rotation.x = swing;
-  unit.rig.legR.rotation.x = -swing;
-  unit.rig.armL.rotation.x = -swing * 0.6;
+  poseCharacterRig(unit, dt);
 }
 
 /* ----------------------------------------------------------------- HUD --- */

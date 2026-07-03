@@ -18,7 +18,7 @@ import {
   withinFacingCone,
 } from "../../shared/combat.js";
 import { SPAWN_CELLS } from "../../shared/map-data.js";
-import { INPUT_BOUNDS, MODE_DEFS, PHASE_MS } from "../../shared/protocol.js";
+import { INPUT_BOUNDS, MODE_DEFS, normalizePrimaryWeapon, PHASE_MS } from "../../shared/protocol.js";
 
 const DEFAULT_PRIMARY = "pike";
 const DEFAULT_SIDEARM = "backstop";
@@ -39,12 +39,13 @@ function createWeaponState(id) {
 }
 
 export function createPlayerState(entry) {
+  const primary = normalizePrimaryWeapon(entry.primary);
   return {
     id: entry.id,
     name: entry.name,
     team: entry.team,
     ticket: entry.ticket ?? null,
-    primary: entry.primary ?? DEFAULT_PRIMARY,
+    primary,
     x: 0,
     y: 0,
     z: 0,
@@ -59,9 +60,9 @@ export function createPlayerState(entry) {
     kills: 0,
     deaths: 0,
     damage: 0,
-    activeWeapon: entry.primary ?? DEFAULT_PRIMARY,
+    activeWeapon: primary,
     weapons: {
-      [entry.primary ?? DEFAULT_PRIMARY]: createWeaponState(entry.primary ?? DEFAULT_PRIMARY),
+      [primary]: createWeaponState(primary),
       [DEFAULT_SIDEARM]: createWeaponState(DEFAULT_SIDEARM),
       [DEFAULT_MELEE]: createWeaponState(DEFAULT_MELEE),
     },
@@ -107,14 +108,14 @@ export function roomHasCapacity(meta) {
   return (meta.roster?.length ?? 0) < roomCapacity(meta.mode);
 }
 
-export function addPrivateRosterEntry(meta, live, name, now = Date.now()) {
+export function addPrivateRosterEntry(meta, live, name, now = Date.now(), primary = DEFAULT_PRIMARY) {
   const seat = meta.roster.length;
   const entry = {
     id: crypto.randomUUID(),
     name,
     team: teamForSeat(meta.mode, seat),
     createdAt: now,
-    primary: DEFAULT_PRIMARY,
+    primary: normalizePrimaryWeapon(primary),
   };
   meta.roster.push(entry);
   const player = createPlayerState(entry);

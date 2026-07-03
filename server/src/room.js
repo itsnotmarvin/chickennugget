@@ -25,6 +25,7 @@ import {
   errorMessage,
   INBOUND_TYPES,
   MODE_DEFS,
+  normalizePrimaryWeapon,
   parseClientMessage,
   PHASE_MS,
   RATE_LIMITS,
@@ -132,6 +133,7 @@ export class RoomDO extends DurableObject {
 
     const nameCheck = validateName(url.searchParams.get("name") ?? "");
     if (!nameCheck.ok) return wsResponseError(nameCheck.code, 400);
+    const primary = normalizePrimaryWeapon(url.searchParams.get("primary"));
 
     const ticket = url.searchParams.get("ticket");
     let rosterEntry = null;
@@ -143,7 +145,7 @@ export class RoomDO extends DurableObject {
       rosterEntry = this.meta.roster.find((entry) => entry.name === nameCheck.value) ?? null;
       if (!rosterEntry) {
         if (!roomHasCapacity(this.meta)) return wsResponseError("room_full", 409);
-        rosterEntry = addPrivateRosterEntry(this.meta, this.live, nameCheck.value);
+        rosterEntry = addPrivateRosterEntry(this.meta, this.live, nameCheck.value, Date.now(), primary);
         await this.ctx.storage.put("meta", this.meta);
       } else if (this.live.players.get(rosterEntry.id)?.connected) {
         return wsResponseError("name_taken", 409);

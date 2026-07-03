@@ -566,7 +566,7 @@ async function joinQueue(queueMode) {
   renderQueueStatus();
   setLobbyStatus(queueMode === "squad" ? "Finding a 2v2 lobby..." : "Finding a duel...");
   try {
-    await net.joinQueue(regionValueForMatchmaking(), queueMode, currentCallsign());
+    await net.joinQueue(regionValueForMatchmaking(), queueMode, currentCallsign(), state.primary);
   } catch (error) {
     setModalVisible("queueOverlay", false);
     showToast(`Queue failed: ${error.message}`);
@@ -583,6 +583,7 @@ async function createPrivateRoom() {
       region: regionValueForMatchmaking(),
       mode: "duel",
       name: currentCallsign(),
+      primary: state.primary,
     });
     onlineState.roomCode = room.code;
     onlineState.inviteRegion = room.region;
@@ -592,6 +593,7 @@ async function createPrivateRoom() {
     await net.joinRoom(room.code, {
       name: currentCallsign(),
       region: room.region,
+      primary: state.primary,
     });
     setLobbyStatus(`Private room ${room.code} created.`);
   } catch (error) {
@@ -615,6 +617,7 @@ async function joinPrivateRoom(code, region) {
     await net.joinRoom(code, {
       name: currentCallsign(),
       region,
+      primary: state.primary,
     });
   } catch (error) {
     showToast(`Room join failed: ${error.message}`);
@@ -746,6 +749,7 @@ function wireOnlineFlow() {
         name: currentCallsign(),
         ticket,
         region,
+        primary: state.primary,
       });
     } catch (error) {
       showToast(`Match join failed: ${error.message}`);
@@ -1297,10 +1301,11 @@ function refreshLoadout() {
   $("selectedPrimaryBody").textContent = weapon.blurb;
   $("lobbyWeaponName").textContent = weapon.name;
   $("lobbyWeaponBody").textContent = weapon.blurb;
+  const fireMode = weapon.kind === "sniper" ? "Bolt action" : weapon.auto ? "Full auto" : "Semi auto";
   $("loadoutStats").innerHTML = `
     <span>Damage ${weapon.damage}</span>
     <span>Mag ${weapon.mag}</span>
-    <span>${weapon.auto ? "Full auto" : "Semi auto"}</span>
+    <span>${fireMode}</span>
     <span>${Math.round(60000 / weapon.cooldownMs)} rpm</span>
   `;
   const skin = SKINS.find((entry) => entry.id === state.skin) || SKINS[0];

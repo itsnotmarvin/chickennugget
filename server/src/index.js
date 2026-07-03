@@ -2,13 +2,14 @@ import { MatchmakerDO } from "./matchmaker.js";
 import { RoomDO } from "./room.js";
 import {
   errorMessage,
+  normalizePrimaryWeapon,
   protocolMeta,
   REGION_HINTS,
+  RATE_LIMITS,
   validateMode,
   validateName,
   validateRegion,
   validateRoomCode,
-  RATE_LIMITS,
 } from "../../shared/protocol.js";
 import { SlidingWindowLimiter } from "./limits.js";
 
@@ -100,6 +101,7 @@ export default {
       }
       const nameCheck = validateName(body.name ?? "");
       if (!nameCheck.ok) return json(errorMessage(nameCheck.code), 400);
+      const primary = normalizePrimaryWeapon(body.primary);
 
       let code = "";
       do {
@@ -119,6 +121,7 @@ export default {
           region: body.region,
           mode: body.mode,
           name: nameCheck.value,
+          primary,
         }),
       });
 

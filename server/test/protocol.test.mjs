@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   ERROR_CODES,
+  normalizePrimaryWeapon,
   parseClientMessage,
   RATE_LIMITS,
   sanitizeName,
@@ -18,6 +19,12 @@ test("sanitizeName strips controls and unsupported punctuation", () => {
 test("validateRoomCode accepts Angle room alphabet", () => {
   assert.equal(validateRoomCode("ABCD23").ok, true);
   assert.equal(validateRoomCode("O0I1L2").ok, false);
+});
+
+test("normalizePrimaryWeapon accepts loadout primaries and falls back safely", () => {
+  assert.equal(normalizePrimaryWeapon("hawk"), "hawk");
+  assert.equal(normalizePrimaryWeapon("backstop"), "pike");
+  assert.equal(normalizePrimaryWeapon("unknown"), "pike");
 });
 
 test("validateClientMessage enforces input bounds", () => {

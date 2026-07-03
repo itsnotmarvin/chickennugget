@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { MODE_DEFS, RATE_LIMITS, validateName } from "../../shared/protocol.js";
+import { MODE_DEFS, normalizePrimaryWeapon, RATE_LIMITS, validateName } from "../../shared/protocol.js";
 import { teamForSeat } from "./room-logic.js";
 
 function json(data, status = 200) {
@@ -41,6 +41,7 @@ export class MatchmakerDO extends DurableObject {
 
     const nameCheck = validateName(url.searchParams.get("name") ?? "");
     if (!nameCheck.ok) return json({ type: "error", code: nameCheck.code }, 400);
+    const primary = normalizePrimaryWeapon(url.searchParams.get("primary"));
 
     const parts = url.pathname.split("/").filter(Boolean);
     this.region = parts[1] ?? this.region;
@@ -57,6 +58,7 @@ export class MatchmakerDO extends DurableObject {
       lastPingAt: 0,
       region: this.region,
       mode: this.mode,
+      primary,
     };
 
     const pair = new WebSocketPair();
@@ -165,7 +167,7 @@ export class MatchmakerDO extends DurableObject {
           name: session.name,
           ticket: crypto.randomUUID(),
           team: teamForSeat(this.mode, index),
-          primary: "pike",
+          primary: session.primary,
         }));
 
         await roomStub.fetch("https://room/internal/setup-match", {

@@ -282,11 +282,12 @@ export function off(type, fn) {
   listeners.get(type)?.delete(fn);
 }
 
-export async function joinQueue(region, mode, name) {
+export async function joinQueue(region, mode, name, primary = "pike") {
   resetRoomTracking();
   const url = backendWs();
   url.pathname = `/queue/${encodeURIComponent(region)}/${encodeURIComponent(mode)}/ws`;
   url.searchParams.set("name", name);
+  url.searchParams.set("primary", primary);
   await connect(url, "queue");
 }
 
@@ -296,11 +297,11 @@ export async function leaveQueue() {
   teardownSocket({ silent: true });
 }
 
-export async function createRoom({ region, mode, name }) {
+export async function createRoom({ region, mode, name, primary = "pike" }) {
   const response = await fetch(`${backendHttp()}/rooms`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ region, mode, name }),
+    body: JSON.stringify({ region, mode, name, primary }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -310,12 +311,13 @@ export async function createRoom({ region, mode, name }) {
   return body;
 }
 
-export async function joinRoom(codeOrId, { name, ticket = null, region = "uswest" }) {
+export async function joinRoom(codeOrId, { name, ticket = null, region = "uswest", primary = "pike" }) {
   resetRoomTracking();
   const url = backendWs();
   url.pathname = `/room/${encodeURIComponent(codeOrId)}/ws`;
   url.searchParams.set("name", name);
   url.searchParams.set("region", region);
+  url.searchParams.set("primary", primary);
   if (ticket) url.searchParams.set("ticket", ticket);
   await connect(url, "room");
 }

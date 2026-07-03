@@ -35,6 +35,18 @@ export const WEAPON_STATS = Object.freeze({
     range: 120,
     speedMult: 0.94,
   }),
+  hawk: Object.freeze({
+    id: "hawk",
+    slot: "primary",
+    damage: 109,
+    headMult: 1.5,
+    cooldownMs: 1000,
+    reloadMs: 1900,
+    mag: 3,
+    reserve: 18,
+    range: 160,
+    speedMult: 0.95,
+  }),
   backstop: Object.freeze({
     id: "backstop",
     slot: "sidearm",

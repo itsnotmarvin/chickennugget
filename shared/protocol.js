@@ -1,4 +1,5 @@
 import { MAP_AABB } from "./map-data.js";
+import { WEAPON_STATS } from "./combat.js";
 
 export const PROTOCOL_VERSION = 1;
 export const ROOM_CODE_RE = /^[A-Z2-9]{6}$/;
@@ -111,6 +112,12 @@ export function validateRegion(region) {
 
 export function validateMode(mode) {
   return Object.hasOwn(MODE_DEFS, mode);
+}
+
+export function normalizePrimaryWeapon(value) {
+  const id = String(value ?? "");
+  const weapon = WEAPON_STATS[id];
+  return weapon?.slot === "primary" ? id : "pike";
 }
 
 export function normalizeRoomCode(code) {
