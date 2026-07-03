@@ -228,12 +228,20 @@ function createEl(tag, options = {}) {
   return node;
 }
 
+function rawCallsign() {
+  return String(state.callsign ?? "").trim();
+}
+
+function displayCallsign() {
+  return rawCallsign() || DEFAULT_CALLSIGN;
+}
+
 function currentCallsign() {
-  return (state.callsign || DEFAULT_CALLSIGN).trim() || DEFAULT_CALLSIGN;
+  return rawCallsign();
 }
 
 function validOnlineCallsign() {
-  const name = currentCallsign();
+  const name = rawCallsign();
   return name.length >= 3 && name.length <= 16;
 }
 
@@ -338,7 +346,7 @@ function wireProfile() {
   });
 
   $("callsignInput").addEventListener("input", (event) => {
-    state.callsign = event.target.value.trim() || DEFAULT_CALLSIGN;
+    state.callsign = event.target.value;
     save();
     refreshIdentity();
     resumeInviteJoinIfReady();
@@ -1231,9 +1239,12 @@ function refreshAll() {
 }
 
 function refreshIdentity() {
-  const callsign = currentCallsign();
+  const callsignInput = $("callsignInput");
+  const callsign = displayCallsign();
   const agent = agentById(state.agent);
-  $("callsignInput").value = callsign;
+  if (document.activeElement !== callsignInput) {
+    callsignInput.value = String(state.callsign ?? "");
+  }
   $("profileTitle").textContent = callsign;
   $("profileBio").textContent = agent.profile;
   $("profileAvatar").textContent = callsign[0].toUpperCase();

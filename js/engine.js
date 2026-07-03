@@ -845,7 +845,7 @@ function makePlayer() {
   return {
     isPlayer: true,
     team: "blue",
-    name: state.callsign || "Aegis",
+    name: String(state.callsign ?? "").trim() || "Aegis",
     agent,
     x: 0, z: 0, y: 0, vy: 0, yaw: 0, pitch: 0,
     hp: 100, shield: 0, shieldDecay: 0,
@@ -936,6 +936,10 @@ function isOnlineMatch() {
   return !!match?.online;
 }
 
+function isBotRoundMode(modeId = match?.mode?.id) {
+  return modeId === "botstrike" || modeId === "duelbot";
+}
+
 function phaseLabel(phase) {
   if (phase === "freeze") return "freeze";
   if (phase === "live") return "live";
@@ -1009,7 +1013,7 @@ export function startMatch({ modeId, onEnd }) {
     ended: false,
   };
 
-  if (mode.id === "botstrike" || mode.id === "duelbot") {
+  if (isBotRoundMode(mode.id)) {
     const allyAgent = AGENTS[(AGENTS.findIndex((a) => a.id === state.agent) + 1) % AGENTS.length];
     const enemyNames = [...BOT_NAMES.enemy].sort(() => Math.random() - 0.5);
     if (mode.id === "botstrike") {
@@ -1040,7 +1044,7 @@ export function startMatch({ modeId, onEnd }) {
   bindMatchInput();
   refreshViewmodel();
 
-  if (mode.id === "botstrike" || mode.id === "duelbot") {
+  if (isBotRoundMode(mode.id)) {
     beginRound();
   } else {
     match.phase = "live";
@@ -2068,7 +2072,7 @@ function killUnit(attacker, victim, head) {
 }
 
 function checkRoundEnd() {
-  if (!match || (match.mode.id !== "botstrike" && match.mode.id !== "duelbot") || match.phase !== "live") return;
+  if (!match || !isBotRoundMode() || match.phase !== "live") return;
   const blueAlive = combatants.some((u) => u.team === "blue" && u.alive);
   const redAlive = combatants.some((u) => u.team === "red" && u.alive);
   if (blueAlive && redAlive) return;
@@ -2833,7 +2837,7 @@ function updateHud(dt) {
     hud.objective.textContent = match.roomCode
       ? `${match.mode.name} room ${match.roomCode}`
       : `${match.mode.name} server-auth`;
-  } else if (match.mode.id === "botstrike" || match.mode.id === "duelbot") {
+  } else if (isBotRoundMode()) {
     let remain;
     if (match.phase === "live") remain = Math.max(0, match.roundEndsAt - nowMs());
     else if (match.phase === "freeze") remain = match.mode.roundMs;
@@ -2949,7 +2953,7 @@ function frame(t) {
     clockMs += dt * 1000;
 
     // Phase transitions.
-    if (!isOnlineMatch() && match.mode.id === "botstrike") {
+    if (!isOnlineMatch() && isBotRoundMode()) {
       if (match.phase === "freeze" && nowMs() >= match.phaseUntil) {
         match.phase = "live";
         showBanner("LIVE", "", 700, "win");

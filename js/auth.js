@@ -3,7 +3,7 @@ import { state } from "./state.js";
 export function getIdentity() {
   return {
     kind: "guest",
-    name: state.callsign || "Aegis",
+    name: String(state.callsign ?? "").trim() || "Aegis",
   };
 }
 
